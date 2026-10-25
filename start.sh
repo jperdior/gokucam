@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Start VanishCam on macOS or Linux (Windows: start.bat).
-# Usage: ./start.sh [--mode normal|goku] [--blur-background] [--no-virtual-camera] [...]
+# Start GokuCam on macOS or Linux (Windows: start.bat).
+# Usage: ./start.sh [--blur-background] [--no-virtual-camera] [...]
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -17,20 +17,20 @@ if [ ! -x "$VENV_PY" ]; then
     fi
   done
   if [ -z "$PYTHON" ]; then
-    echo "[VanishCam] Python 3.12 not found. Install it (macOS: brew install python@3.12)" >&2
+    echo "[GokuCam] Python 3.12 not found. Install it (macOS: brew install python@3.12)" >&2
     exit 1
   fi
-  echo "[VanishCam] Creating the local Python environment with $PYTHON..."
+  echo "[GokuCam] Creating the local Python environment with $PYTHON..."
   "$PYTHON" -m venv "$VENV_DIR"
 fi
 
 if ! "$VENV_PY" -c "import cv2, mediapipe, numpy, pyvirtualcam" >/dev/null 2>&1; then
-  echo "[VanishCam] Installing dependencies (internet needed only this time)..."
+  echo "[GokuCam] Installing dependencies (internet needed only this time)..."
   "$VENV_PY" -m pip install --upgrade pip
   "$VENV_PY" -m pip install -r requirements.txt
 fi
 
-"$VENV_PY" -c "from vanish_cam import download_models; download_models()"
+"$VENV_PY" -c "from gokucam import download_models; download_models()"
 
-echo "[VanishCam] Starting the webcam..."
-exec "$VENV_PY" vanish_cam.py "$@"
+echo "[GokuCam] Starting the webcam..."
+exec "$VENV_PY" gokucam.py "$@"

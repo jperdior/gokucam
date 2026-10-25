@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-import vanish_cam as app
+import gokucam as app
 from goku_effect import (
     HOLD_SECONDS, GokuPoseDetector, GokuTrigger, forehead_from_face,
     _squeeze, goku_pose_from_landmarks, render_teleport,
@@ -118,8 +118,7 @@ class GokuVideoLoopTests(unittest.TestCase):
         detector = Mock()
         displayed = []
         with ExitStack() as mocks:
-            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(
-                mode="goku", virtual_camera=False)))
+            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(virtual_camera=False)))
             mocks.enter_context(patch.object(app, "download_models"))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), detector)))
@@ -134,7 +133,7 @@ class GokuVideoLoopTests(unittest.TestCase):
                 mocks.enter_context(patch.object(app.cv2, name))
             mocks.enter_context(patch.object(app.cv2, "imshow",
                                              side_effect=lambda name, frame: displayed.append(frame.copy())))
-            # V and R are ignored in Goku mode.
+            # V and R do nothing: only the gesture vanishes and brings you back.
             keys = (0, 0, 0, ord("r"), ord("v"), 0, ord("q"))
             mocks.enter_context(patch.object(app.cv2, "waitKey", side_effect=keys))
             mocks.enter_context(patch("builtins.print"))

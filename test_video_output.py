@@ -8,14 +8,14 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-import vanish_cam as app
+import gokucam as app
 
 
 def arguments(**overrides):
     values = dict(
         camera=0, width=960, height=540, fps=30.0, fullscreen=False,
         no_mirror=True, virtual_camera=None, virtual_backend=None, virtual_device=None,
-        gesture_debug=False, mode="normal", blur_background=False, background_file=None,
+        gesture_debug=False, blur_background=False, background_file=None,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -64,7 +64,7 @@ class VirtualCameraTests(unittest.TestCase):
 
 
 class VideoLoopTests(unittest.TestCase):
-    def run_mock_video(self, send_error=None, gesture=("No_Hand", 0.0), **overrides):
+    def run_mock_video(self, send_error=None, **overrides):
         capture = Mock()
         frames = [np.full((24, 40, 3), color, np.uint8) for color in (10, 40, 80, 120, 160)]
         capture.read.side_effect = [(True, frame) for frame in frames]
@@ -80,16 +80,18 @@ class VideoLoopTests(unittest.TestCase):
             opening = mocks.enter_context(patch.object(app, "open_virtual_camera", return_value=camera))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((24, 40), np.float32)))
             mocks.enter_context(patch.object(app, "person_fraction", return_value=0.0))
-            mocks.enter_context(patch.object(app, "recognize_gesture", return_value=gesture))
-            times = (0, 0, 0.1, 4.1, 4.3, 4.35, 5.0, 5.02, 8.2, 8.23)
+            # The teleport fires on the first check once the background is ready.
+            mocks.enter_context(patch.object(app, "update_goku", side_effect=[True, False, False]))
+            mocks.enter_context(patch.object(app, "update_saiyan"))
+            times = (0, 0, 0.1, 4.1, 4.3, 4.35, 5.2, 5.22, 8.2, 8.23)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
             mocks.enter_context(patch.object(app.cv2, "namedWindow"))
             mocks.enter_context(patch.object(app.cv2, "resizeWindow"))
             destroy = mocks.enter_context(patch.object(app.cv2, "destroyAllWindows"))
             mocks.enter_context(patch.object(app.cv2, "imshow", side_effect=lambda name, frame: displayed.append(frame.copy())))
-            keys = (0, 0, ord("v") if gesture[0] != "Victory" else 0, 0, ord("q"))
+            keys = (0, 0, 0, 0, ord("q"))
             mocks.enter_context(patch.object(app.cv2, "waitKey", side_effect=keys))
-            mocks.enter_context(patch.object(app.cv2, "putText", side_effect=AssertionError("Overlay vietato")))
+            mocks.enter_context(patch.object(app.cv2, "putText", side_effect=AssertionError("No text on the video")))
             mocks.enter_context(patch("builtins.print"))
             if send_error is None:
                 self.assertEqual(app.run(), 0)
@@ -111,15 +113,8 @@ class VideoLoopTests(unittest.TestCase):
         for sent, preview in zip(camera.send.call_args_list, displayed):
             np.testing.assert_array_equal(sent.args[0], preview)
         np.testing.assert_array_equal(displayed[0], frames[0])  # Calibrating.
-        np.testing.assert_array_equal(displayed[2], frames[2])  # Ready.
+        np.testing.assert_array_equal(displayed[2], frames[2])  # Ready: the gesture fires.
         np.testing.assert_array_equal(displayed[4], frames[1])  # Vanished: only the background.
-
-    def test_first_gesture_starts_dissolve_in_preview_and_virtual_output(self):
-        frames, camera, displayed = self.run_mock_video(gesture=("Victory", 0.9))
-        np.testing.assert_array_equal(camera.send.call_args_list[2].args[0], displayed[2])
-        self.assertTrue(np.any(displayed[3] != frames[3]))  # Animating.
-        self.assertTrue(np.any(displayed[3] != frames[1]))  # Not vanished yet.
-        np.testing.assert_array_equal(displayed[4], frames[1])  # Animation finished.
 
     def test_virtual_output_is_not_mirrored(self):
         _, camera, displayed = self.run_mock_video(no_mirror=False)
@@ -151,7 +146,8 @@ class CalibrationTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "download_models"))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
-            mocks.enter_context(patch.object(app, "recognize_gesture", return_value=("No_Hand", 0.0)))
+            mocks.enter_context(patch.object(app, "update_goku", return_value=False))
+            mocks.enter_context(patch.object(app, "update_saiyan"))
             # A person in the first frame, then the room stays empty.
             checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=[0.3, 0.0, 0.0]))
             times = (0, 0, 0.1, 0.2, 0.9, 1.0)
@@ -176,7 +172,8 @@ class CalibrationTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "download_models"))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
-            mocks.enter_context(patch.object(app, "recognize_gesture", return_value=("No_Hand", 0.0)))
+            mocks.enter_context(patch.object(app, "update_goku", return_value=False))
+            mocks.enter_context(patch.object(app, "update_saiyan"))
             checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=person_checks))
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=(0, 0, 0.1, 0.2, 0.9, 1.0)))
             for name in ("namedWindow", "resizeWindow", "destroyAllWindows", "imshow"):

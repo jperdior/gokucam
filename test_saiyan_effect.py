@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-import vanish_cam as app
+import gokucam as app
 from goku_effect import GokuTrigger, HOLD_SECONDS
 from saiyan_effect import (
     POWER_DOWN_SECONDS, TRANSFORM_SECONDS, Head, SaiyanState, both_fists, fist,
