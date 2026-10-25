@@ -9,7 +9,7 @@ import numpy as np
 
 
 HOLD_SECONDS = 1.0
-TELEPORT_SECONDS = 1.15
+TELEPORT_SECONDS = 0.8
 # Short detection dropouts while holding the pose do not restart the countdown.
 POSE_GRACE_SECONDS = 0.25
 FACE_MEMORY_MS = 1000
@@ -150,13 +150,13 @@ def _line_columns(width: int) -> tuple[np.ndarray, ...]:
     """Per-column dash pattern, fixed so the lines do not flicker between frames."""
     if width not in _columns:
         rng = np.random.default_rng(4114)
-        active = (rng.random(width) < 0.16).astype(np.float32)
+        active = (rng.random(width) < 0.08).astype(np.float32)
         # Thicken some lines to 2-3 px for a hand-drawn comic look.
         thick = np.convolve(active, np.ones(3, np.float32), mode="same") * (rng.random(width) < 0.5)
         active = np.clip(active + thick, 0.0, 1.0)
         dash = rng.uniform(40.0, 140.0, width).astype(np.float32)
         phase = rng.random(width, dtype=np.float32)
-        speed = rng.uniform(2.5, 5.0, width).astype(np.float32)
+        speed = rng.uniform(4.0, 8.0, width).astype(np.float32)
         duty = rng.uniform(0.35, 0.75, width).astype(np.float32)
         _columns[width] = active, dash, phase, speed, duty
     return _columns[width]
@@ -170,34 +170,78 @@ def speed_lines(height: int, left: int, right: int, top: int, bottom: int,
     return (position < duty).astype(np.float32) * active
 
 
+AURA_COLOR = np.array((255, 230, 170), np.float32)  # Pale blue-white, BGR.
+
+
+def _squeeze(layer: np.ndarray, center_x: float, scale: float) -> np.ndarray:
+    """Compress a layer horizontally toward a vertical centre line."""
+    height, width = layer.shape[:2]
+    source_x = center_x + (np.arange(width, dtype=np.float32) - center_x) / scale
+    map_x = np.ascontiguousarray(np.broadcast_to(source_x, (height, width)))
+    map_y = np.ascontiguousarray(np.broadcast_to(
+        np.arange(height, dtype=np.float32)[:, None], (height, width)))
+    return cv2.remap(layer, map_x, map_y, cv2.INTER_LINEAR,
+                     borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+
 def render_teleport(frame: np.ndarray, background: np.ndarray, mask: np.ndarray,
                     progress: float, t: float) -> np.ndarray:
-    """Draw the teleport at progress 0..1; play it backwards to reappear."""
+    """Draw Instant Transmission at progress 0..1; play it backwards to reappear.
+
+    Speed lines and an aura build up, the body flickers, then squeezes into a
+    bright vertical line that blinks out while the lines fade where it stood.
+    """
     progress = min(1.0, max(0.0, progress))
-    gone = _smoothstep(0.42, 0.6, progress)
-    lines = _smoothstep(0.0, 0.25, progress) * (1.0 - _smoothstep(0.72, 1.0, progress))
-    flash = _smoothstep(0.25, 0.45, progress) * (1.0 - gone)
+    lines = _smoothstep(0.15, 0.45, progress) * (1.0 - _smoothstep(0.8, 1.0, progress))
+    aura = _smoothstep(0.0, 0.3, progress) * (1.0 - _smoothstep(0.6, 0.75, progress))
+    flash = _smoothstep(0.25, 0.55, progress)
+    squeeze = _smoothstep(0.45, 0.75, progress)
+    gone = _smoothstep(0.74, 0.82, progress)
+    beam = _smoothstep(0.6, 0.74, progress) * (1.0 - _smoothstep(0.76, 0.84, progress))
+    blink = 0.25 if 0.3 <= progress < 0.5 and int(progress * 60) % 2 else 1.0
+
     canvas = background.copy()
     points = cv2.findNonZero((mask > 0.05).astype(np.uint8))
     if points is None:
         return canvas
     x, y, w, h = cv2.boundingRect(points)
     height, width = mask.shape
-    left, top = max(0, x - 30), max(0, y - 30)
-    right, bottom = min(width, x + w + 30), min(height, y + h + 30)
+    left, top = max(0, x - 40), max(0, y - 40)
+    right, bottom = min(width, x + w + 40), min(height, y + h + 40)
     area = np.s_[top:bottom, left:right]
+    silhouette = mask[area]
+    columns = np.arange(right - left, dtype=np.float32)
+    center_x = float((silhouette.sum(axis=0) * columns).sum() / max(float(silhouette.sum()), 1e-6))
 
     person = frame[area].astype(np.float32)
-    person += (255.0 - person) * flash * 0.65
-    alpha = (mask[area] * (1.0 - gone))[:, :, None]
-    output = person * alpha + background[area].astype(np.float32) * (1.0 - alpha)
+    person += (255.0 - person) * flash * 0.75
+    alpha = silhouette * blink * (1.0 - gone)
+    if squeeze > 0.001:
+        scale = 1.0 - 0.97 * squeeze
+        person = _squeeze(person, center_x, scale)
+        alpha = _squeeze(alpha, center_x, scale)
+    output = person * alpha[:, :, None] + background[area].astype(np.float32) * (1.0 - alpha[:, :, None])
+
+    if aura > 0.001:
+        ring = np.clip(cv2.GaussianBlur(alpha, (0, 0), sigmaX=9.0) * 2.0 - alpha, 0.0, 1.0)
+        ring = (ring * aura * 0.8)[:, :, None]
+        output = output * (1.0 - ring) + AURA_COLOR * ring
+    if beam > 0.001:
+        # The thin bright line the body collapses into just before it vanishes.
+        rows = cv2.GaussianBlur(silhouette.max(axis=1), (0, 0), sigmaX=6.0).ravel()
+        across = np.exp(-((columns - center_x) / 4.0) ** 2)
+        halo = np.exp(-((columns - center_x) / 16.0) ** 2)
+        core = (beam * rows[:, None] * across[None, :])[:, :, None]
+        glow = (beam * 0.8 * rows[:, None] * halo[None, :])[:, :, None]
+        output = output * (1.0 - glow) + AURA_COLOR * glow
+        output = output * (1.0 - core) + 255.0 * core
     if lines > 0.001:
-        region = cv2.GaussianBlur(mask[area], (0, 0), sigmaX=7.0)
+        region = cv2.GaussianBlur(silhouette, (0, 0), sigmaX=7.0)
         core = speed_lines(height, left, right, top, bottom, width, t) * region * lines
         glow = cv2.GaussianBlur(core, (0, 0), sigmaX=3.0)
         glow = np.clip(glow * 1.6, 0.0, 1.0)[:, :, None]
         core = core[:, :, None]
-        output = output * (1.0 - glow * 0.7) + np.array((255, 225, 150), np.float32) * glow * 0.7
+        output = output * (1.0 - glow * 0.7) + AURA_COLOR * glow * 0.7
         output = output * (1.0 - core) + 255.0 * core
     canvas[area] = np.clip(output, 0, 255).astype(np.uint8)
     return canvas

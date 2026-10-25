@@ -8,7 +8,7 @@ import numpy as np
 import vanish_cam as app
 from goku_effect import (
     HOLD_SECONDS, GokuPoseDetector, GokuTrigger, forehead_from_face,
-    goku_pose_from_landmarks, render_teleport,
+    _squeeze, goku_pose_from_landmarks, render_teleport,
 )
 from test_video_output import arguments
 
@@ -97,6 +97,12 @@ class TeleportRenderTests(unittest.TestCase):
         np.testing.assert_array_equal(start[20, 40], self.frame[20, 40])
         end = render_teleport(self.frame, self.background, self.mask, 1.0, 0.0)
         np.testing.assert_array_equal(end, self.background)
+
+    def test_body_squeezes_into_a_line_before_vanishing(self):
+        squeezed = _squeeze(self.mask, 40.0, 0.1)
+        visible = np.flatnonzero(squeezed[30] > 0.5)
+        self.assertLessEqual(len(visible), 3)
+        self.assertTrue(np.all(np.abs(visible - 40) <= 2))
 
     def test_lines_are_drawn_mid_effect(self):
         middle = render_teleport(self.frame, self.background, self.mask, 0.7, 0.3)
