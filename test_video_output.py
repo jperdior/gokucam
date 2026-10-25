@@ -1,6 +1,8 @@
 import argparse
+import tempfile
 import unittest
 from contextlib import ExitStack
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -13,7 +15,7 @@ def arguments(**overrides):
     values = dict(
         camera=0, width=960, height=540, fps=30.0, fullscreen=False,
         no_mirror=True, virtual_camera=None, virtual_backend=None, virtual_device=None,
-        gesture_debug=False, mode="normal", blur_background=False,
+        gesture_debug=False, mode="normal", blur_background=False, background_file=None,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -77,7 +79,7 @@ class VideoLoopTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(segmenter, recognizer)))
             opening = mocks.enter_context(patch.object(app, "open_virtual_camera", return_value=camera))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((24, 40), np.float32)))
-            mocks.enter_context(patch.object(app, "frame_has_person", return_value=False))
+            mocks.enter_context(patch.object(app, "person_fraction", return_value=0.0))
             mocks.enter_context(patch.object(app, "recognize_gesture", return_value=gesture))
             times = (0, 0, 0.1, 4.1, 4.3, 4.35, 5.0, 5.02, 8.2, 8.23)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
@@ -133,10 +135,10 @@ class BackgroundCheckTests(unittest.TestCase):
         background = np.zeros((24, 40, 3), np.uint8)
         person = np.zeros((24, 40), np.float32)
         with patch.object(app, "person_mask", return_value=person):
-            self.assertFalse(app.frame_has_person(Mock(), background, 0))
+            self.assertEqual(app.person_fraction(Mock(), background, 0), 0.0)
         person[4:20, 10:25] = 1.0
         with patch.object(app, "person_mask", return_value=person):
-            self.assertTrue(app.frame_has_person(Mock(), background, 0))
+            self.assertAlmostEqual(app.person_fraction(Mock(), background, 0), 16 * 15 / (24 * 40))
 
 
 class CalibrationTests(unittest.TestCase):
@@ -151,7 +153,7 @@ class CalibrationTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
             mocks.enter_context(patch.object(app, "recognize_gesture", return_value=("No_Hand", 0.0)))
             # A person in the first frame, then the room stays empty.
-            checks = mocks.enter_context(patch.object(app, "frame_has_person", side_effect=[True, False, False]))
+            checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=[0.3, 0.0, 0.0]))
             times = (0, 0, 0.1, 0.2, 0.9, 1.0)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
             for name in ("namedWindow", "resizeWindow", "destroyAllWindows", "imshow"):
@@ -163,6 +165,36 @@ class CalibrationTests(unittest.TestCase):
         messages = [str(call.args[0]) for call in printed.call_args_list]
         self.assertEqual(sum("Ti vedo" in message for message in messages), 1)
         self.assertTrue(any("Sfondo pronto" in message for message in messages))
+
+    def run_with_background_file(self, path, person_checks):
+        frames = [np.full((24, 40, 3), color, np.uint8) for color in (10, 40, 80, 120)]
+        capture = Mock()
+        capture.read.side_effect = [(True, frame) for frame in frames]
+        with ExitStack() as mocks:
+            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(
+                virtual_camera=False, background_file=path)))
+            mocks.enter_context(patch.object(app, "download_models"))
+            mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
+            mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
+            mocks.enter_context(patch.object(app, "recognize_gesture", return_value=("No_Hand", 0.0)))
+            checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=person_checks))
+            mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=(0, 0, 0.1, 0.2, 0.9, 1.0)))
+            for name in ("namedWindow", "resizeWindow", "destroyAllWindows", "imshow"):
+                mocks.enter_context(patch.object(app.cv2, name))
+            mocks.enter_context(patch.object(app.cv2, "waitKey", side_effect=(0, 0, 0, ord("q"))))
+            mocks.enter_context(patch("builtins.print"))
+            self.assertEqual(app.run(), 0)
+        return frames, checks
+
+    def test_clean_background_is_saved_and_reused_next_time(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "background.png"
+            frames, checks = self.run_with_background_file(path, [0.0, 0.0, 0.0])
+            self.assertEqual(checks.call_count, 3)
+            np.testing.assert_array_equal(app.cv2.imread(str(path)), frames[2])
+            # Next start: the saved plate is used straight away, no person checks.
+            _, checks = self.run_with_background_file(path, [])
+            self.assertEqual(checks.call_count, 0)
 
 
 class BlurBackgroundTests(unittest.TestCase):

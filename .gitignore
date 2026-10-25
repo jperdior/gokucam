@@ -8,3 +8,4 @@ models/
 /build/
 /dist/*
 !/dist/VanishCam.exe
+background.png

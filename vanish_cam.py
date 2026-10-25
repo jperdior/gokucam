@@ -21,6 +21,7 @@ from mediapipe.tasks.python import vision
 
 try:
     from .goku_effect import GokuPoseDetector, GokuTrigger, TELEPORT_SECONDS, render_teleport
+    from .saiyan_effect import SaiyanState, golden_hair, render_saiyan
     from .naruto_effect import (
         EFFECT_SECONDS, joined_hands_from_landmarks, landed_log_anchor,
         load_log, overlay_log, render_substitution, substitution_anchor,
@@ -28,6 +29,7 @@ try:
     from .vanish_sound import SOUND_PATH, VanishSound
 except ImportError:
     from goku_effect import GokuPoseDetector, GokuTrigger, TELEPORT_SECONDS, render_teleport
+    from saiyan_effect import SaiyanState, golden_hair, render_saiyan
     from naruto_effect import (
         EFFECT_SECONDS, joined_hands_from_landmarks, landed_log_anchor,
         load_log, overlay_log, render_substitution, substitution_anchor,
@@ -41,8 +43,10 @@ WINDOW_NAME = "Webcam - Anteprima"
 
 SEGMENTER_MODEL = MODEL_DIR / "selfie_segmenter_landscape.tflite"
 GESTURE_MODEL = MODEL_DIR / "gesture_recognizer.task"
+HAIR_MODEL = MODEL_DIR / "hair_segmenter.tflite"
 HAND_MODEL = APP_DIR / "hand_landmarker.task"
 FACE_MODEL = APP_DIR / "face_landmarker.task"
+BACKGROUND_FILE = APP_DIR / "background.png"
 
 MODEL_URLS = {
     SEGMENTER_MODEL: (
@@ -53,6 +57,10 @@ MODEL_URLS = {
     GESTURE_MODEL: (
         "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/"
         "gesture_recognizer/float16/1/gesture_recognizer.task"
+    ),
+    HAIR_MODEL: (
+        "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+        "hair_segmenter/float32/latest/hair_segmenter.tflite"
     ),
 }
 
@@ -104,6 +112,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode", choices=("normal", "naruto", "goku"),
         help="Salta il menu iniziale e avvia direttamente la modalità scelta",
+    )
+    parser.add_argument(
+        "--background-file", type=Path, default=BACKGROUND_FILE,
+        help="Dove salvare lo sfondo per riusarlo al prossimo avvio (SPAZIO ne acquisisce uno nuovo)",
     )
     parser.add_argument(
         "--blur-background", action="store_true",
@@ -203,6 +215,8 @@ def download_models(mode: str = "normal") -> None:
     for destination, url in MODEL_URLS.items():
         if mode != "normal" and destination == GESTURE_MODEL:
             continue
+        if mode != "goku" and destination == HAIR_MODEL:
+            continue
         if destination.exists() and destination.stat().st_size > 100_000:
             continue
 
@@ -253,7 +267,7 @@ def open_camera(index: int, width: int, height: int) -> cv2.VideoCapture:
 
 
 def create_goku_detector() -> GokuPoseDetector:
-    for model in (HAND_MODEL, FACE_MODEL):
+    for model in (HAND_MODEL, FACE_MODEL, HAIR_MODEL):
         if not model.is_file():
             raise RuntimeError(f"Modello non trovato: {model}")
     hands = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
@@ -273,10 +287,18 @@ def create_goku_detector() -> GokuPoseDetector:
             min_face_presence_confidence=0.4,
             min_tracking_confidence=0.4,
         ))
+        hair = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
+            base_options=python.BaseOptions(model_asset_path=str(HAIR_MODEL)),
+            running_mode=vision.RunningMode.VIDEO,
+            output_confidence_masks=True,
+            output_category_mask=False,
+        ))
     except Exception:
         hands.close()
+        if "face" in locals():
+            face.close()
         raise
-    return GokuPoseDetector(hands, face)
+    return GokuPoseDetector(hands, face, hair)
 
 
 def create_tasks(mode: str = "normal") -> tuple[vision.ImageSegmenter, MultiViewGestureRecognizer | MultiViewHandLandmarker | GokuPoseDetector]:
@@ -383,15 +405,16 @@ def person_mask(
     return np.clip((resized - 0.12) / 0.68, 0.0, 1.0)
 
 
-def frame_has_person(
+def person_fraction(
     segmenter: vision.ImageSegmenter, frame: np.ndarray, timestamp_ms: int
-) -> bool:
-    """A person left in the background would stay visible after vanishing."""
+) -> float:
+    """Share of the frame covered by a person; one left in the background
+    would stay visible after vanishing."""
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     height, width = frame.shape[:2]
     mask = person_mask(segmenter, image, timestamp_ms, width, height)
-    return float((mask > 0.5).mean()) > 0.02
+    return float((mask > 0.5).mean())
 
 
 def blur_background(background: np.ndarray) -> np.ndarray:
@@ -704,6 +727,19 @@ def update_goku(detector: GokuPoseDetector, trigger: GokuTrigger, image: mp.Imag
     return event == "trigger"
 
 
+def update_saiyan(detector: GokuPoseDetector, trigger: GokuTrigger, saiyan: SaiyanState,
+                  now: float) -> None:
+    """Both fists held for a second toggle Super Saiyan on and off."""
+    event = trigger.update(detector.fists, now)
+    if event == "start":
+        print("[Saiyan] Pugni riconosciuti: tienili per 1 secondo...")
+    elif event == "broken":
+        print("[Saiyan] Pugni abbassati: il conto alla rovescia ricomincia.")
+    elif event == "trigger":
+        saiyan.toggle(now)
+        print("[Saiyan] Super Saiyan!" if saiyan.active else "[Saiyan] Ritorno normale.")
+
+
 def set_fullscreen(enabled: bool) -> None:
     mode = cv2.WINDOW_FULLSCREEN if enabled else cv2.WINDOW_NORMAL
     cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, mode)
@@ -711,7 +747,7 @@ def set_fullscreen(enabled: bool) -> None:
 
 def self_test() -> int:
     """Check bundled resources and model initialization without opening a webcam."""
-    required = (SEGMENTER_MODEL, GESTURE_MODEL, HAND_MODEL, FACE_MODEL, SOUND_PATH)
+    required = (SEGMENTER_MODEL, GESTURE_MODEL, HAIR_MODEL, HAND_MODEL, FACE_MODEL, SOUND_PATH)
     missing = [path.name for path in required if not path.is_file()]
     if missing:
         raise RuntimeError(f"Risorse mancanti: {', '.join(missing)}")
@@ -751,6 +787,11 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
     if vanish_sound is not None:
         resources.callback(vanish_sound.close)
     goku_trigger = GokuTrigger()
+    # Two hands track less steadily than one, so forgive longer dropouts.
+    saiyan_trigger = GokuTrigger(grace_seconds=0.6)
+    saiyan = SaiyanState()
+    hair_mask: np.ndarray | None = None
+    hair_mask_at = float("-inf")
     resources.callback(cv2.destroyAllWindows)
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, args.width, args.height)
@@ -762,6 +803,11 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
         set_fullscreen(True)
 
     background: np.ndarray | None = None
+    # Reuse the last clean background so the person does not have to leave
+    # the frame on every start; SPACE captures a new one.
+    saved_background = None
+    if args.background_file is not None and args.background_file.is_file():
+        saved_background = cv2.imread(str(args.background_file))
     background_samples: list[tuple[float, np.ndarray]] = []
     empty_since: float | None = None
     last_mask: np.ndarray | None = None
@@ -802,13 +848,21 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
             mp_image = None
 
             if state.phase == "calibrating":
+                if saved_background is not None:
+                    if saved_background.shape == camera_frame.shape:
+                        background = (blur_background(saved_background) if args.blur_background
+                                      else saved_background)
+                        state.phase = "ready"
+                        print("[Webcam] Uso lo sfondo salvato. Premi SPAZIO per acquisirne uno nuovo.")
+                    saved_background = None
                 # Capture as soon as the frame has been empty for a moment, so
                 # the person does not have to time leaving with a countdown.
-                if frame_has_person(segmenter, camera_frame, elapsed_ms):
+                elif (fraction := person_fraction(segmenter, camera_frame, elapsed_ms)) > 0.02:
                     background_samples.clear()
                     empty_since = None
                     if now - person_notice_at >= PERSON_NOTICE_SECONDS:
-                        print("[Webcam] Ti vedo ancora nell'inquadratura: esci del tutto.")
+                        print(f"[Webcam] Ti vedo ancora nell'inquadratura ({fraction:.0%} "
+                              "dell'immagine): esci del tutto.")
                         person_notice_at = now
                 else:
                     if empty_since is None:
@@ -823,6 +877,8 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
                         candidate = np.median(stack, axis=0).astype(np.uint8)
                         background_samples.clear()
                         empty_since = None
+                        if args.background_file is not None:
+                            cv2.imwrite(str(args.background_file), candidate)
                         # Every effect composites over this plate, so blurring it
                         # once also blurs what is left behind after vanishing.
                         background = blur_background(candidate) if args.blur_background else candidate
@@ -865,8 +921,13 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
                     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                     last_mask = person_mask(segmenter, mp_image, elapsed_ms, width, height)
                     last_mask_at = now
+                teleport_frame = camera_frame
+                level = saiyan.level(now)
+                if level > 0.0 and hair_mask is not None:
+                    # The golden hair teleports with the person.
+                    teleport_frame = golden_hair(camera_frame, hair_mask, last_mask, level)
                 display = render_teleport(
-                    camera_frame, background, last_mask,
+                    teleport_frame, background, last_mask,
                     1.0 - progress if appearing else progress, now,
                 )
                 if progress >= 1.0:
@@ -891,6 +952,8 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
                             state.phase = "goku_vanishing"
                             state.vanish_started = now
                             last_mask = None
+                        else:
+                            update_saiyan(recognizer, saiyan_trigger, saiyan, now)
                     elif mode == "normal":
                         name, score = recognize_gesture(recognizer, mp_image, elapsed_ms)
                         if args.gesture_debug and now - last_gesture_report >= 1.0:
@@ -937,12 +1000,22 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
                         vanished_frame = display
                 elif state.phase in ("ready", "goku_vanishing"):
                     display = camera_frame
-                    if args.blur_background:
+                    level = saiyan.level(now) if mode == "goku" else 0.0
+                    if args.blur_background or level > 0.0:
                         if mp_image is None:
                             rgb = cv2.cvtColor(camera_frame, cv2.COLOR_BGR2RGB)
                             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                         mask = person_mask(segmenter, mp_image, elapsed_ms, width, height)
+                    if args.blur_background:
                         display = alpha_composite(camera_frame, background, mask)
+                    if level > 0.0:
+                        # Hair segmentation is the slowest model; refresh it
+                        # every other frame, which still follows the head.
+                        if hair_mask is None or now - hair_mask_at >= 0.06:
+                            hair_mask = recognizer.hair_mask(mp_image, elapsed_ms)
+                            hair_mask_at = now
+                        display = render_saiyan(display, mask, hair_mask, level,
+                                                saiyan.burst(now), now)
                 else:
                     progress = 0.0
                     if state.phase == "vanishing" and state.vanish_started is not None:
@@ -978,6 +1051,7 @@ def run_camera(args: argparse.Namespace, resources: ExitStack, mode: str) -> int
                 empty_since = None
                 person_notice_at = float("-inf")
                 goku_trigger.reset()
+                saiyan_trigger.reset()
                 print("[Webcam] Esci dall'inquadratura: acquisisco il nuovo sfondo appena e' vuota.")
             # In Goku mode only the gesture makes you vanish and reappear.
             elif key == ord("r") and mode != "goku":

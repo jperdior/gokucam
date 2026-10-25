@@ -150,7 +150,7 @@ class NarutoVideoLoopTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "VanishSound", return_value=sound))
             mocks.enter_context(patch.object(app, "open_virtual_camera", return_value=virtual))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((80, 120), np.float32)))
-            mocks.enter_context(patch.object(app, "frame_has_person", return_value=False))
+            mocks.enter_context(patch.object(app, "person_fraction", return_value=0.0))
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=(
                 0, 0, 0.1, 4.1, 4.3, 4.35, 4.40, 4.42, 5.05, 5.1, 5.9,
             )))

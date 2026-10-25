@@ -7,6 +7,11 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+try:
+    from .saiyan_effect import Head, both_fists, head_from_face
+except ImportError:
+    from saiyan_effect import Head, both_fists, head_from_face
+
 
 HOLD_SECONDS = 1.0
 TELEPORT_SECONDS = 0.8
@@ -74,29 +79,56 @@ def goku_pose_from_landmarks(hands, forehead: tuple[np.ndarray, float] | None,
 class GokuPoseDetector:
     """Track hands and face in video; remember the face while fingers cover it."""
 
-    def __init__(self, hands, face):
+    def __init__(self, hands, face, hair=None):
         self.hands = hands
         self.face = face
+        self.hair = hair
         self.forehead: tuple[np.ndarray, float] | None = None
         self.forehead_ms = -FACE_MEMORY_MS
+        self.head: Head | None = None
+        self.fists = False
         self.last_hand_count = 0
 
-    def detect(self, image, timestamp_ms: int) -> bool:
+    def track_face(self, image, timestamp_ms: int) -> None:
         faces = self.face.detect_for_video(image, timestamp_ms).face_landmarks
-        found = forehead_from_face(faces[0] if faces else None, image.width, image.height)
+        face = faces[0] if faces else None
+        found = forehead_from_face(face, image.width, image.height)
         if found is not None:
             self.forehead, self.forehead_ms = found, timestamp_ms
+            head = head_from_face(face, image.width, image.height)
+            if head is not None:
+                self.head = head.blend(self.head)
         elif timestamp_ms - self.forehead_ms > FACE_MEMORY_MS:
             self.forehead = None
+            self.head = None
+
+    def detect(self, image, timestamp_ms: int) -> bool:
+        self.track_face(image, timestamp_ms)
         hands = self.hands.detect_for_video(image, timestamp_ms).hand_landmarks
         self.last_hand_count = len(hands)
+        self.fists = both_fists(hands, self.head, image.width, image.height)
         return goku_pose_from_landmarks(hands, self.forehead, image.width, image.height)
+
+    def hair_mask(self, image, timestamp_ms: int) -> np.ndarray | None:
+        """Hair confidence per pixel, for the Super Saiyan recolouring."""
+        if self.hair is None:
+            return None
+        masks = self.hair.segment_for_video(image, timestamp_ms).confidence_masks
+        if len(masks) < 2:
+            return None
+        # The model returns background and hair; hair is the second mask.
+        hair = np.squeeze(masks[1].numpy_view()).astype(np.float32)
+        return cv2.resize(hair, (image.width, image.height), interpolation=cv2.INTER_LINEAR)
 
     def close(self) -> None:
         try:
             self.hands.close()
         finally:
-            self.face.close()
+            try:
+                self.face.close()
+            finally:
+                if self.hair is not None:
+                    self.hair.close()
 
 
 @dataclass
@@ -106,6 +138,8 @@ class GokuTrigger:
     hold_started: float | None = None
     last_pose_at: float | None = None
     armed: bool = True
+    hold_seconds: float = HOLD_SECONDS
+    grace_seconds: float = POSE_GRACE_SECONDS
 
     def update(self, pose: bool, now: float) -> str | None:
         if pose:
@@ -115,12 +149,12 @@ class GokuTrigger:
             if self.hold_started is None:
                 self.hold_started = now
                 return "start"
-            if now - self.hold_started >= HOLD_SECONDS:
+            if now - self.hold_started >= self.hold_seconds:
                 self.hold_started = None
                 self.armed = False
                 return "trigger"
             return None
-        if self.last_pose_at is not None and now - self.last_pose_at <= POSE_GRACE_SECONDS:
+        if self.last_pose_at is not None and now - self.last_pose_at <= self.grace_seconds:
             return None
         broken = self.hold_started is not None
         self.hold_started = None
@@ -130,7 +164,7 @@ class GokuTrigger:
     def remaining(self, now: float) -> float | None:
         if self.hold_started is None:
             return None
-        return max(0.0, HOLD_SECONDS - (now - self.hold_started))
+        return max(0.0, self.hold_seconds - (now - self.hold_started))
 
     def reset(self) -> None:
         self.hold_started = None

@@ -124,9 +124,10 @@ class GokuVideoLoopTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), detector)))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((24, 40), np.float32)))
-            mocks.enter_context(patch.object(app, "frame_has_person", return_value=False))
+            mocks.enter_context(patch.object(app, "person_fraction", return_value=0.0))
             # Fires on the first check while ready and the first one while vanished.
             mocks.enter_context(patch.object(app, "update_goku", return_value=True))
+            mocks.enter_context(patch.object(app, "update_saiyan"))
             times = (0, 0, 0.1, 4.1, 4.3, 4.4, 6.0, 6.1, 8.0)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
             for name in ("namedWindow", "resizeWindow", "destroyAllWindows"):
