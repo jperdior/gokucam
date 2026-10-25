@@ -123,13 +123,19 @@ class SaiyanState:
 _flames: dict[tuple[int, int], np.ndarray] = {}
 
 
+AURA_WIDTH = 2.5  # How far the aura reaches out from the body.
+
+
 def _flame_texture(height: int, width: int) -> np.ndarray:
     """Vertically stretched noise that scrolls upwards like flames."""
     key = (height, width)
     if key not in _flames:
         rng = np.random.default_rng(9001)
         noise = rng.random((height, width), dtype=np.float32)
-        noise = cv2.GaussianBlur(noise, (0, 0), sigmaX=1.5, sigmaY=6.0)
+        # Wrap before blurring so the texture tiles and scrolls without a seam.
+        pad = 24
+        noise = np.pad(noise, ((pad, pad), (0, 0)), mode="wrap")
+        noise = cv2.GaussianBlur(noise, (0, 0), sigmaX=1.5, sigmaY=6.0)[pad:-pad]
         noise = (noise - noise.min()) / max(float(noise.max() - noise.min()), 1e-6)
         _flames[key] = noise
     return _flames[key]
@@ -145,6 +151,11 @@ def render_aura(display: np.ndarray, mask: np.ndarray, level: float, burst: floa
     small = cv2.resize(mask, small_size, interpolation=cv2.INTER_AREA)
     sh, sw = small.shape
     spread = 4.0 + 6.0 * level + 5.0 * burst
+    # Grow the silhouette before blurring so a wider aura stays just as bright.
+    grow = int(sh * 0.03 * (AURA_WIDTH - 1.0) * min(1.0, level + burst))
+    if grow > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1, 2 * grow + 1))
+        small = cv2.dilate(small, kernel)
     body = cv2.GaussianBlur(small, (0, 0), sigmaX=spread)
     # Let the flames lick upwards: stretch the halo above the silhouette.
     rise = int(sh * 0.06 * (0.5 + level))
