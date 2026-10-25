@@ -14,6 +14,15 @@ If you like this project and want to support it, you can buy me a coffee through
 
 The published EXE may predate the Particles and Goku modes. To use them now, run the local scripts or rebuild the EXE from these sources.
 
+## macOS
+
+1. Install Python 3.12 if needed: `brew install python@3.12`.
+2. Run `./start.sh` (or `./start.sh --mode naruto`). The first run creates `.venv`, installs the dependencies, and downloads the MediaPipe models.
+3. When macOS asks, allow your terminal app to use the camera. If you missed the prompt, enable it in **System Settings → Privacy & Security → Camera** and restart the terminal.
+4. For a virtual camera, install [OBS Studio](https://obsproject.com/) and click **Start Virtual Camera** once so macOS installs the camera extension, then stop it. Use `./start.sh --no-virtual-camera` to show only the preview window.
+
+Only the `normal` and `naruto` modes are currently implemented in `vanish_cam.py`. Run the tests with `.venv/bin/python -m pip install pytest && .venv/bin/python -m pytest -q`.
+
 ## Getting started
 
 1. Double-click `AVVIA_LOCALE.bat`.
