@@ -19,21 +19,29 @@ The published EXE may predate the Particles and Goku modes. To use them now, run
 1. Install Python 3.12 if needed: `brew install python@3.12`.
 2. Run `./start.sh` (or `./start.sh --mode naruto`). The first run creates `.venv`, installs the dependencies, and downloads the MediaPipe models.
 3. When macOS asks, allow your terminal app to use the camera. If you missed the prompt, enable it in **System Settings → Privacy & Security → Camera** and restart the terminal.
-4. For a virtual camera, install [OBS Studio](https://obsproject.com/) and click **Start Virtual Camera** once so macOS installs the camera extension, then stop it. Use `./start.sh --no-virtual-camera` to show only the preview window.
+4. For a virtual camera, install [OBS Studio](https://obsproject.com/) and click **Start Virtual Camera** once. Enable **OBS Virtual Camera** in **System Settings → General → Login Items & Extensions → Camera Extensions**, then stop the virtual camera and quit OBS. Use `./start.sh --no-virtual-camera` to show only the preview window.
 
-Only the `normal` and `naruto` modes are currently implemented in `vanish_cam.py`. Run the tests with `.venv/bin/python -m pip install pytest && .venv/bin/python -m pytest -q`.
+### Google Meet
+
+```bash
+./start.sh --mode goku --blur-background --virtual-camera
+```
+
+In Meet, pick **OBS Virtual Camera** and turn Meet's own background effects off: `--blur-background` blurs the room inside the app, so you vanish into the blurred background and the effect stays sharp. The preview window is mirrored, but the virtual camera is not, so Meet shows you the right way round.
+
+Implemented modes: `normal`, `naruto`, and `goku` (`./start.sh --mode goku`). Particles is not implemented yet. Run the tests with `.venv/bin/python -m pip install pytest && .venv/bin/python -m pytest -q`.
 
 ## Getting started
 
 1. Double-click `AVVIA_LOCALE.bat`.
-2. In the start menu, choose **Normal Vanish**, **Naruto Vanish**, **Particles**, or **Goku** with the mouse or the `1`, `2`, `3`, and `4` keys.
-3. Step out of the camera frame for 4 seconds while the background is captured. The terminal tells you when you can step back in.
+2. In the start menu, choose **Normal Vanish**, **Naruto Vanish**, or **Goku** with the mouse or the `1`, `2`, and `3` keys.
+3. Step out of the camera frame. The background is captured as soon as the frame has been empty for half a second, and the terminal tells you when you can step back in.
 
 **Normal Vanish:** Raise your index and middle fingers in a V sign. The dissolve starts as soon as the gesture is recognized and lasts about 3.6 seconds.
 
 **Particles:** Make the same V sign as in Normal Vanish. Your silhouette breaks into small colored fragments that drift sideways as if carried by the wind. The effect lasts about 2.1 seconds. It captures your silhouette once when the effect starts to keep the video smooth.
 
-**Goku:** Hold your index and middle fingers straight and together against your forehead for 1 second. Animated vertical comic-style lines run across your silhouette just before you teleport away and linger briefly afterward. To reappear, lower your hand, then repeat the gesture for another 1 second. The return uses the reverse effect. If you break the pose, the countdown starts over. `assets/teleport.MP3` plays on both disappearance and reappearance. The terminal shows the countdown for each gesture. The `V` and `R` keys are disabled in this mode: the gesture is the only way to disappear and reappear. No text is overlaid on the video.
+**Goku:** Hold your index and middle fingers straight and together against your forehead for 1 second. Animated vertical comic-style lines run across your silhouette just before you teleport away and linger briefly afterward. To reappear, lower your hand, then repeat the gesture for another 1 second. The return uses the reverse effect. If you break the pose, the countdown starts over. The terminal shows the countdown for each gesture. The `V` and `R` keys are disabled in this mode: the gesture is the only way to disappear and reappear. No text is overlaid on the video.
 
 **Naruto Vanish:** Bring your palms together in front of the webcam, with your fingers side by side rather than interlaced. Keep both hands visible. As soon as the gesture is recognized, you vanish in a cloud of smoke and a wooden log appears, falls, and remains visible until you press `R`. No microphone is needed. Naruto mode uses `hand_landmarker.task` to track both hands. `assets/vanish.MP3` plays through your computer speakers when the disappearance starts, including when triggered with `V`. You can trigger it again after pressing `R`.
 
@@ -80,4 +88,4 @@ To troubleshoot gesture recognition without adding text to the video, pass `--ge
 
 The [wooden log](assets/substitution_log.png) is an original illustration generated with ImageGen using the supplied image as a visual reference. Smoke is drawn in real time by `naruto_effect.py` so it follows the person's position and scales with the video. We also considered a [CC0 smoke sprite sheet](https://opengameart.org/content/smoke-sprite-sheet), but the procedural animation adapts better to dynamic positioning without an additional asset. No anime frames or assets are included in the project.
 
-Goku mode uses the [MediaPipe BlazeFace short-range model](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/README.md) to estimate the forehead position and `hand_landmarker.task` to track the fingers. The teleport's visual trace is drawn in code, without anime frames.
+Goku mode uses the MediaPipe face landmarker (`face_landmarker.task`) to find the forehead and `hand_landmarker.task` to track the fingers. The teleport's visual trace is drawn in code, without anime frames.

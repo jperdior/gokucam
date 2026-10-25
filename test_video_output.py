@@ -13,7 +13,7 @@ def arguments(**overrides):
     values = dict(
         camera=0, width=960, height=540, fps=30.0, fullscreen=False,
         no_mirror=True, virtual_camera=None, virtual_backend=None, virtual_device=None,
-        gesture_debug=False, mode="normal",
+        gesture_debug=False, mode="normal", blur_background=False,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -62,7 +62,7 @@ class VirtualCameraTests(unittest.TestCase):
 
 
 class VideoLoopTests(unittest.TestCase):
-    def run_mock_video(self, send_error=None, gesture=("No_Hand", 0.0)):
+    def run_mock_video(self, send_error=None, gesture=("No_Hand", 0.0), **overrides):
         capture = Mock()
         frames = [np.full((24, 40, 3), color, np.uint8) for color in (10, 40, 80, 120, 160)]
         capture.read.side_effect = [(True, frame) for frame in frames]
@@ -71,12 +71,13 @@ class VideoLoopTests(unittest.TestCase):
         camera.send.side_effect = send_error
         displayed = []
         with ExitStack() as mocks:
-            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments()))
+            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(**overrides)))
             mocks.enter_context(patch.object(app, "download_models"))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(segmenter, recognizer)))
             opening = mocks.enter_context(patch.object(app, "open_virtual_camera", return_value=camera))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((24, 40), np.float32)))
+            mocks.enter_context(patch.object(app, "frame_has_person", return_value=False))
             mocks.enter_context(patch.object(app, "recognize_gesture", return_value=gesture))
             times = (0, 0, 0.1, 4.1, 4.3, 4.35, 5.0, 5.02, 8.2, 8.23)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
@@ -118,8 +119,59 @@ class VideoLoopTests(unittest.TestCase):
         self.assertTrue(np.any(displayed[3] != frames[1]))  # Non ancora sparito.
         np.testing.assert_array_equal(displayed[4], frames[1])  # Animazione completata.
 
+    def test_virtual_output_is_not_mirrored(self):
+        _, camera, displayed = self.run_mock_video(no_mirror=False)
+        for sent, preview in zip(camera.send.call_args_list, displayed):
+            np.testing.assert_array_equal(sent.args[0], preview[:, ::-1])
+
     def test_all_devices_close_on_send_error(self):
         self.run_mock_video(send_error=RuntimeError("send failed"))
+
+
+class BackgroundCheckTests(unittest.TestCase):
+    def test_background_with_a_person_is_rejected(self):
+        background = np.zeros((24, 40, 3), np.uint8)
+        person = np.zeros((24, 40), np.float32)
+        with patch.object(app, "person_mask", return_value=person):
+            self.assertFalse(app.frame_has_person(Mock(), background, 0))
+        person[4:20, 10:25] = 1.0
+        with patch.object(app, "person_mask", return_value=person):
+            self.assertTrue(app.frame_has_person(Mock(), background, 0))
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_background_is_captured_once_the_frame_stays_empty(self):
+        frames = [np.full((24, 40, 3), color, np.uint8) for color in (10, 40, 80, 120)]
+        capture = Mock()
+        capture.read.side_effect = [(True, frame) for frame in frames]
+        with ExitStack() as mocks:
+            mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(virtual_camera=False)))
+            mocks.enter_context(patch.object(app, "download_models"))
+            mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
+            mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
+            mocks.enter_context(patch.object(app, "recognize_gesture", return_value=("No_Hand", 0.0)))
+            # A person in the first frame, then the room stays empty.
+            checks = mocks.enter_context(patch.object(app, "frame_has_person", side_effect=[True, False, False]))
+            times = (0, 0, 0.1, 0.2, 0.9, 1.0)
+            mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
+            for name in ("namedWindow", "resizeWindow", "destroyAllWindows", "imshow"):
+                mocks.enter_context(patch.object(app.cv2, name))
+            mocks.enter_context(patch.object(app.cv2, "waitKey", side_effect=(0, 0, 0, ord("q"))))
+            printed = mocks.enter_context(patch("builtins.print"))
+            self.assertEqual(app.run(), 0)
+        self.assertEqual(checks.call_count, 3)  # No checks once the background is ready.
+        messages = [str(call.args[0]) for call in printed.call_args_list]
+        self.assertEqual(sum("Ti vedo" in message for message in messages), 1)
+        self.assertTrue(any("Sfondo pronto" in message for message in messages))
+
+
+class BlurBackgroundTests(unittest.TestCase):
+    def test_blur_softens_detail_but_keeps_size(self):
+        background = np.zeros((60, 80, 3), np.uint8)
+        background[:, ::2] = 255
+        blurred = app.blur_background(background)
+        self.assertEqual(blurred.shape, background.shape)
+        self.assertLess(blurred.std(), background.std() * 0.2)
 
 
 if __name__ == "__main__":
