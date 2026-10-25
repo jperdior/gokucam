@@ -1,91 +1,158 @@
-# VanishCam — webcam disappearance effects
+# VanishCam
 
-Video is processed on your computer. It is neither recorded nor sent to a server. The preview window and virtual camera show only the video and effects, without overlaid menus, instructions, or text.
+Webcam effects for your video calls: vanish with a V sign, or teleport and go Super Saiyan like Goku. It runs on macOS, Windows, and Linux, and works in Google Meet, Microsoft Teams, Zoom, or any app that can use a camera, through the OBS Virtual Camera.
 
-For step-by-step instructions in English and Italian, see the [user guide](USER_GUIDE_EN_IT.md).
+Video is processed locally on your computer. Nothing is recorded or sent anywhere.
 
-## ☕ Buy me a coffee
+## Where the idea came from
 
-If you like this project and want to support it, you can buy me a coffee through [PayPal](https://paypal.me/nicovic17) or [Revolut](https://revolut.me/nicoauriemma).
+This project started as a fork of [Nicovic17/vanish_webcam](https://github.com/Nicovic17/vanish_webcam), a Windows app that makes you vanish from your webcam with a hand gesture. The background capture and the V-sign dissolve come from there. This version adds:
 
-## Download for Windows
+- **Goku mode:** Instant Transmission with two fingers on the forehead, and a Super Saiyan transformation with golden hair and aura.
+- **Cross-platform launchers:** one script for macOS and Linux, one for Windows.
+- **Video-call output:** a blurred background, and virtual camera output that is not mirrored.
+- **A saved background:** you don't have to leave the frame every time you start.
 
-[Download VanishCam.exe]( https://nicoaauriemma.vercel.app/shop ) and double-click it to run the app. You do not need to install Python.
+The Naruto mode, the bundled audio, and the Italian interface from the original were removed.
 
-The published EXE may predate the Particles and Goku modes. To use them now, run the local scripts or rebuild the EXE from these sources.
+## Effects
 
-## macOS
+**Normal Vanish**
+- Raise your index and middle fingers in a V sign.
+- You dissolve into the background over about 3.6 seconds.
+- Press `R` to reappear.
 
-1. Install Python 3.12 if needed: `brew install python@3.12`.
-2. Run `./start.sh` (or `./start.sh --mode naruto`). The first run creates `.venv`, installs the dependencies, and downloads the MediaPipe models.
-3. When macOS asks, allow your terminal app to use the camera. If you missed the prompt, enable it in **System Settings → Privacy & Security → Camera** and restart the terminal.
-4. For a virtual camera, install [OBS Studio](https://obsproject.com/) and click **Start Virtual Camera** once. Enable **OBS Virtual Camera** in **System Settings → General → Login Items & Extensions → Camera Extensions**, then stop the virtual camera and quit OBS. Use `./start.sh --no-virtual-camera` to show only the preview window.
+**Goku: Instant Transmission**
+- Hold your index and middle fingers straight and together on your forehead for 1 second.
+- Speed lines and a flash appear, you collapse into a beam of light, and you vanish.
+- To come back, lower your hand, then repeat the gesture.
+- If you break the pose before the second is up, the countdown restarts.
 
-### Google Meet
+**Goku: Super Saiyan**
+- In Goku mode, raise both fists in front of you and hold them for 1 second.
+- Your real hair turns gold, and a golden aura flares up around you.
+- Do it again to power down.
+- The golden hair stays on while you teleport.
+
+The terminal shows when a gesture is recognized and the countdown. No text is drawn on the video.
+
+## Install and run
+
+You need Python 3.12; 3.11 and 3.13 also work. MediaPipe does not support newer versions yet. The first run creates a `.venv` folder, installs the dependencies, and downloads the MediaPipe models.
+
+**macOS**
+
+```bash
+brew install python@3.12
+./start.sh
+```
+
+When macOS asks, allow your terminal app to use the camera. If you missed the prompt, turn it on in **System Settings → Privacy & Security → Camera**, then restart the terminal.
+
+**Linux**
+
+```bash
+./start.sh
+```
+
+**Windows**
+
+1. Install Python 3.12 from [python.org](https://www.python.org/downloads/), with the `py` launcher.
+2. Double-click `start.bat`, or run it from a terminal:
+
+```bat
+start.bat --mode goku
+```
+
+A menu lets you pick the effect: click it, or press `1` (Normal Vanish) or `2` (Goku). To skip the menu, pass `--mode normal` or `--mode goku`.
+
+## First start: capture the background
+
+1. Step out of the camera frame.
+2. As soon as the frame has been empty for half a second, the background is captured. The terminal tells you when you can step back in.
+
+The background is saved to `background.png` and reused on later starts, so you only do this once. If the room changes or the camera moves, press `SPACE` to capture a new one.
+
+## Use it in Google Meet or Microsoft Teams
+
+VanishCam sends its video to the **OBS Virtual Camera**. Meet, Teams, and Zoom see it as a normal webcam.
+
+### 1. Install the OBS Virtual Camera (once)
+
+- **macOS:**
+  1. Install [OBS Studio](https://obsproject.com/) and open it.
+  2. Click **Start Virtual Camera** once.
+  3. Allow the extension in **System Settings → General → Login Items & Extensions → Camera Extensions**.
+  4. Stop the virtual camera and quit OBS.
+- **Windows:** install [OBS Studio](https://obsproject.com/). The virtual camera comes with it.
+- **Linux:** install `v4l2loopback`, then load it:
+
+  ```bash
+  sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label="VanishCam"
+  ```
+
+  The `exclusive_caps=1` option lets Chrome-based browsers see the device.
+
+### 2. Start VanishCam
 
 ```bash
 ./start.sh --mode goku --blur-background --virtual-camera
 ```
 
-In Meet, pick **OBS Virtual Camera** and turn Meet's own background effects off: `--blur-background` blurs the room inside the app, so you vanish into the blurred background and the effect stays sharp. The preview window is mirrored, but the virtual camera is not, so Meet shows you the right way round.
+On Windows, run the same options with `start.bat`. The terminal prints `Virtual camera on: OBS Virtual Camera` when it's working.
 
-Implemented modes: `normal`, `naruto`, and `goku` (`./start.sh --mode goku`). Particles is not implemented yet. Run the tests with `.venv/bin/python -m pip install pytest && .venv/bin/python -m pytest -q`.
+**OBS itself must be closed** (or at least its own virtual camera stopped) while VanishCam is running. Only one app can drive the virtual camera at a time.
 
-## Getting started
+### 3. Pick the camera in your call
 
-1. Double-click `AVVIA_LOCALE.bat`.
-2. In the start menu, choose **Normal Vanish**, **Naruto Vanish**, or **Goku** with the mouse or the `1`, `2`, and `3` keys.
-3. Step out of the camera frame. The background is captured as soon as the frame has been empty for half a second, and the terminal tells you when you can step back in.
+- **Google Meet:**
+  1. Go to **Settings → Video → Camera**.
+  2. Choose **OBS Virtual Camera**.
+  3. Turn off **Backgrounds and effects**.
+- **Microsoft Teams:**
+  1. Go to **Settings → Devices → Camera** (or the camera menu before joining).
+  2. Choose **OBS Virtual Camera**.
+  3. Set **Background effects** to none.
+- **Zoom:** go to **Settings → Video → Camera**, choose **OBS Virtual Camera**, and set the virtual background to none.
 
-**Normal Vanish:** Raise your index and middle fingers in a V sign. The dissolve starts as soon as the gesture is recognized and lasts about 3.6 seconds.
+Turn the call app's own blur and background effects off. They would blur or cut out the effect itself. Use `--blur-background` instead: VanishCam blurs the room itself, so you vanish into the blurred background and the effect stays sharp.
 
-**Particles:** Make the same V sign as in Normal Vanish. Your silhouette breaks into small colored fragments that drift sideways as if carried by the wind. The effect lasts about 2.1 seconds. It captures your silhouette once when the effect starts to keep the video smooth.
-
-**Goku:** Hold your index and middle fingers straight and together against your forehead for 1 second. Animated vertical comic-style lines run across your silhouette just before you teleport away and linger briefly afterward. To reappear, lower your hand, then repeat the gesture for another 1 second. The return uses the reverse effect. If you break the pose, the countdown starts over. The terminal shows the countdown for each gesture. The `V` and `R` keys are disabled in this mode: the gesture is the only way to disappear and reappear. No text is overlaid on the video.
-
-**Naruto Vanish:** Bring your palms together in front of the webcam, with your fingers side by side rather than interlaced. Keep both hands visible. As soon as the gesture is recognized, you vanish in a cloud of smoke and a wooden log appears, falls, and remains visible until you press `R`. No microphone is needed. Naruto mode uses `hand_landmarker.task` to track both hands. `assets/vanish.MP3` plays through your computer speakers when the disappearance starts, including when triggered with `V`. You can trigger it again after pressing `R`.
-
-To start a mode without the menu:
-
-```powershell
-local_app\AVVIA_LOCALE.bat --mode naruto
-local_app\AVVIA_LOCALE.bat --mode normal
-local_app\AVVIA_LOCALE.bat --mode particles
-local_app\AVVIA_LOCALE.bat --mode goku
-```
-
-## Virtual camera and OBS
-
-If [OBS Studio](https://obsproject.com/) is installed, the app automatically tries to open **OBS Virtual Camera**. The terminal shows the device name. Use `AVVIA_VIRTUAL.bat` to require a virtual camera. Select **OBS Virtual Camera** in the app that will receive the video. OBS's virtual camera must be stopped while this app is producing its output.
-
-To use the effect in an OBS scene, run `AVVIA_OBS.bat`, add a **Window Capture** source, select **Webcam - Anteprima**, and then start the virtual camera from OBS. Alternatively, use [Unity Capture](https://github.com/schellingb/UnityCapture) as a separate virtual video source:
-
-```powershell
-local_app\AVVIA_VIRTUAL.bat --virtual-backend unitycapture
-```
-
-OBS has only one virtual camera. Do not use it as both an OBS input and output at the same time. See the [pyvirtualcam documentation](https://github.com/letmaik/pyvirtualcam#supported-virtual-cameras).
+The preview window is mirrored like a selfie view. The virtual camera output is not, so the other people in the call see you the right way round. Keyboard controls only work while the preview window has focus.
 
 ## Controls
 
 - `SPACE`: capture a new background.
-- `R`: make the person reappear.
-- `V`: manually start the selected mode's effect.
+- `V`: start the vanish manually (Normal mode).
+- `R`: reappear (Normal mode).
 - `F`: toggle fullscreen.
-- `Q` or `ESC`: quit and release the cameras.
+- `Q` or `ESC`: quit.
 
-The `V` and `R` keys are disabled in Goku mode.
+In Goku mode, only the gestures make you vanish and reappear.
 
-You can change the camera, resolution, and maximum virtual-output FPS:
+## Options
 
-```powershell
-local_app\AVVIA_LOCALE.bat --camera 1 --width 1280 --height 720 --fps 30
+| Option | What it does |
+| --- | --- |
+| `--mode normal\|goku` | Skip the start menu. |
+| `--blur-background` | Blur the room. You vanish into the blurred background. |
+| `--virtual-camera` / `--no-virtual-camera` | Require the virtual camera, or show only the preview window. By default, the virtual camera is used when it's available. |
+| `--virtual-backend obs\|unitycapture\|v4l2loopback` | Choose the virtual camera driver. |
+| `--background-file PATH` | Where the background is saved (default `background.png`). |
+| `--camera N` | Use another webcam (default `0`). |
+| `--width`, `--height`, `--fps` | Capture size and maximum output FPS. |
+| `--no-mirror` | Don't mirror the preview. |
+| `--gesture-debug` | Print gesture recognition details to the terminal. |
+
+## Development
+
+```bash
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest -q
 ```
 
-To troubleshoot gesture recognition without adding text to the video, pass `--gesture-debug`. Diagnostic information appears only in the terminal.
+The effects are drawn in code, from MediaPipe models:
+- **Person segmentation:** finds your silhouette.
+- **Hand and face landmarks:** recognize the gestures.
+- **Hair segmentation:** finds your hair for the golden recolouring.
 
-## Visual assets
-
-The [wooden log](assets/substitution_log.png) is an original illustration generated with ImageGen using the supplied image as a visual reference. Smoke is drawn in real time by `naruto_effect.py` so it follows the person's position and scales with the video. We also considered a [CC0 smoke sprite sheet](https://opengameart.org/content/smoke-sprite-sheet), but the procedural animation adapts better to dynamic positioning without an additional asset. No anime frames or assets are included in the project.
-
-Goku mode uses the MediaPipe face landmarker (`face_landmarker.task`) to find the forehead and `hand_landmarker.task` to track the fingers. The teleport's visual trace is drawn in code, without anime frames.
+No anime frames or images are included.

@@ -2,10 +2,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
-.venv-local/
 models/
 *.part
-/build/
-/dist/*
-!/dist/VanishCam.exe
 background.png

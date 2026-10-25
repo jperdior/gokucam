@@ -49,7 +49,7 @@ class VirtualCameraTests(unittest.TestCase):
     def test_send_preserves_colors_and_handles_noncontiguous_frames(self):
         camera = Mock(width=40, height=24)
         frame = np.zeros((24, 40, 3), np.uint8)
-        frame[:] = (10, 70, 200)  # BGR: non scambiare rosso e blu.
+        frame[:] = (10, 70, 200)  # BGR: do not swap red and blue.
         app.send_virtual_frame(camera, frame[:, ::-1])
         sent = camera.send.call_args.args[0]
         self.assertTrue(sent.flags.c_contiguous)
@@ -110,16 +110,16 @@ class VideoLoopTests(unittest.TestCase):
         self.assertEqual(len(displayed), 5)
         for sent, preview in zip(camera.send.call_args_list, displayed):
             np.testing.assert_array_equal(sent.args[0], preview)
-        np.testing.assert_array_equal(displayed[0], frames[0])  # Calibrazione.
-        np.testing.assert_array_equal(displayed[2], frames[2])  # Pronto.
-        np.testing.assert_array_equal(displayed[4], frames[1])  # Sparito: solo sfondo.
+        np.testing.assert_array_equal(displayed[0], frames[0])  # Calibrating.
+        np.testing.assert_array_equal(displayed[2], frames[2])  # Ready.
+        np.testing.assert_array_equal(displayed[4], frames[1])  # Vanished: only the background.
 
     def test_first_gesture_starts_dissolve_in_preview_and_virtual_output(self):
         frames, camera, displayed = self.run_mock_video(gesture=("Victory", 0.9))
         np.testing.assert_array_equal(camera.send.call_args_list[2].args[0], displayed[2])
-        self.assertTrue(np.any(displayed[3] != frames[3]))  # Animazione in corso.
-        self.assertTrue(np.any(displayed[3] != frames[1]))  # Non ancora sparito.
-        np.testing.assert_array_equal(displayed[4], frames[1])  # Animazione completata.
+        self.assertTrue(np.any(displayed[3] != frames[3]))  # Animating.
+        self.assertTrue(np.any(displayed[3] != frames[1]))  # Not vanished yet.
+        np.testing.assert_array_equal(displayed[4], frames[1])  # Animation finished.
 
     def test_virtual_output_is_not_mirrored(self):
         _, camera, displayed = self.run_mock_video(no_mirror=False)
@@ -163,8 +163,8 @@ class CalibrationTests(unittest.TestCase):
             self.assertEqual(app.run(), 0)
         self.assertEqual(checks.call_count, 3)  # No checks once the background is ready.
         messages = [str(call.args[0]) for call in printed.call_args_list]
-        self.assertEqual(sum("Ti vedo" in message for message in messages), 1)
-        self.assertTrue(any("Sfondo pronto" in message for message in messages))
+        self.assertEqual(sum("still in the frame" in message for message in messages), 1)
+        self.assertTrue(any("Background ready" in message for message in messages))
 
     def run_with_background_file(self, path, person_checks):
         frames = [np.full((24, 40, 3), color, np.uint8) for color in (10, 40, 80, 120)]
