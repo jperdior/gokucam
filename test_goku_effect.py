@@ -120,6 +120,7 @@ class GokuVideoLoopTests(unittest.TestCase):
         with ExitStack() as mocks:
             mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(virtual_camera=False)))
             mocks.enter_context(patch.object(app, "download_models"))
+            mocks.enter_context(patch.object(app, "draw_banner", side_effect=lambda frame, lines: frame))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), detector)))
             mocks.enter_context(patch.object(app, "person_mask", return_value=np.ones((24, 40), np.float32)))

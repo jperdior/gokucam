@@ -4,6 +4,14 @@ Turn Super Saiyan and use Instant Transmission on your webcam. It runs on macOS,
 
 Video is processed locally on your computer. Nothing is recorded or sent anywhere.
 
+## Quick start
+
+1. Run `./start.sh --blur-background` (Windows: `start.bat --blur-background`).
+2. **Leave the camera view completely for a few seconds.** GokuCam needs a picture of the empty room before anything works: the blur, the aura, and the teleport are all drawn over it. The video shows *Leave the camera view*, then *Capturing the empty room...*.
+3. When the video says **Ready! Come back in**, step back in and use the gestures below.
+
+The empty-room picture is saved, so next time you can skip step 2.
+
 ## Where the idea came from
 
 GokuCam started as a fork of [Nicovic17/vanish_webcam](https://github.com/Nicovic17/vanish_webcam), a Windows app that makes you vanish from your webcam with a hand gesture. The idea of triggering effects with gestures, and the background capture this project builds on, come from there.
@@ -22,7 +30,7 @@ GokuCam focuses on Dragon Ball. It adds Instant Transmission, the Super Saiyan t
 - If you break the pose before the second is up, the countdown restarts.
 - If you're Super Saiyan, the golden hair teleports with you.
 
-The terminal shows when a gesture is recognized. No text is drawn on the video.
+The terminal shows when a gesture is recognized and the countdown. Apart from the setup instructions at the start, no text is drawn on the video.
 
 ## Install and run
 
@@ -52,12 +60,17 @@ When macOS asks, allow your terminal app to use the camera. If you missed the pr
 start.bat --blur-background
 ```
 
-## First start: capture the background
+## Before the effects work: capture the empty room
 
-1. Step out of the camera frame.
-2. As soon as the frame has been empty for half a second, the background is captured. The terminal tells you when you can step back in.
+**Until GokuCam has a picture of the empty room, nothing happens:** no blur, no gestures. When it starts, the video and the terminal both ask you to leave the frame.
 
-This background is what's left when you teleport away. It's saved to `background.png` and reused on later starts, so you only do this once. If the room changes or the camera moves, press `SPACE` to capture a new one.
+1. Step completely out of the camera view, including hands, shoulders, and the top of your head.
+2. Wait a few seconds. Once the frame has been empty for about half a second, the room is captured. If part of you is still visible, the terminal says how much of the image you're covering.
+3. When the video shows **Ready! Come back in**, step back in. For the next few seconds, the video also shows a reminder of the gestures.
+
+This picture is what's left behind when you teleport away, and it's what gets blurred with `--blur-background`. It's saved to `background.png` and reused on later starts, so you only need to leave the frame the first time.
+
+Press `SPACE` (with the preview window focused) to capture a new picture, for example if the room changes or the camera moves. Then leave the frame again.
 
 ## Use it in Google Meet or Microsoft Teams
 
@@ -85,7 +98,7 @@ GokuCam sends its video to the **OBS Virtual Camera**. Meet, Teams, and Zoom see
 ./start.sh --blur-background --virtual-camera
 ```
 
-On Windows, run the same options with `start.bat`. The terminal prints `Virtual camera on: OBS Virtual Camera` when it's working.
+On Windows, run the same options with `start.bat`. The terminal prints `Virtual camera on: OBS Virtual Camera` when it's working. If this is the first run, leave the frame until the video says **Ready! Come back in** (see above). The setup instructions also appear in the call, so you can do it after joining.
 
 **OBS itself must be closed** (or at least its own virtual camera stopped) while GokuCam is running. Only one app can drive the virtual camera at a time.
 
@@ -109,7 +122,7 @@ The preview window is mirrored like a selfie view. The virtual camera output is 
 
 - `SPACE`: capture a new background.
 - `F`: toggle fullscreen.
-- `Q` or `ESC`: quit.
+- `Q` or `ESC`: quit. On macOS the window's close button is disabled, so use these keys, or `Ctrl+C` in the terminal.
 
 ## Options
 

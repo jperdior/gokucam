@@ -50,6 +50,7 @@ MODEL_URLS = {
 }
 
 PERSON_NOTICE_SECONDS = 4.0
+READY_BANNER_SECONDS = 5.0
 BACKGROUND_SAMPLE_SECONDS = 0.55
 GESTURE_INTERVAL_SECONDS = 0.08
 
@@ -314,6 +315,39 @@ def update_saiyan(detector: GokuPoseDetector, trigger: GokuTrigger, saiyan: Saiy
         print("[Saiyan] Super Saiyan!" if saiyan.active else "[Saiyan] Back to normal.")
 
 
+def ask_to_leave_frame() -> None:
+    print("[GokuCam] STEP 1: leave the camera view completely for a few seconds.")
+    print("[GokuCam]         GokuCam needs a picture of the empty room first: the blur and")
+    print("[GokuCam]         the Goku gestures only start working once it has one.")
+
+
+def announce_ready(come_back: bool = True) -> None:
+    print("[GokuCam] STEP 2: come back in. Blur and gestures are now active:" if come_back
+          else "[GokuCam] Blur and gestures are active:")
+    print("[GokuCam]   - Both fists up for 1 second: Super Saiyan (again to power down).")
+    print("[GokuCam]   - Two fingers on your forehead for 1 second: Instant Transmission"
+          " (again to come back).")
+
+
+def draw_banner(frame: np.ndarray, lines: list[str]) -> np.ndarray:
+    """Setup instructions in a translucent band at the bottom of the video."""
+    output = frame.copy()
+    height, width = frame.shape[:2]
+    scale = width / 1280.0
+    font, thickness = cv2.FONT_HERSHEY_SIMPLEX, max(1, round(2 * scale))
+    sizes = [0.95 * scale] + [0.7 * scale] * (len(lines) - 1)
+    line_height = int(44 * scale)
+    band_top = height - line_height * len(lines) - int(24 * scale)
+    band = output[band_top:]
+    band[:] = (band.astype(np.float32) * 0.35).astype(np.uint8)
+    for index, (text, size) in enumerate(zip(lines, sizes)):
+        (text_width, _), _ = cv2.getTextSize(text, font, size, thickness)
+        origin = ((width - text_width) // 2, band_top + int(36 * scale) + index * line_height)
+        color = (80, 220, 255) if index == 0 else (240, 240, 240)  # Gold title, BGR.
+        cv2.putText(output, text, origin, font, size, color, thickness, cv2.LINE_AA)
+    return output
+
+
 def set_fullscreen(enabled: bool) -> None:
     mode = cv2.WINDOW_FULLSCREEN if enabled else cv2.WINDOW_NORMAL
     cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, mode)
@@ -380,11 +414,12 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
     virtual_camera = None
     virtual_camera_initialized = False
     person_notice_at = float("-inf")
+    ready_at = float("-inf")
+    came_back = True
     started = time.perf_counter()
-    print("[Webcam] Step out of the frame: the background is captured as soon as it is empty.")
-    print("[Webcam] Fists up for 1 s: Super Saiyan. Two fingers on the forehead for 1 s: "
-          "Instant Transmission.")
-    print("[Webcam] Window keys: SPACE new background, F fullscreen, Q quit.")
+    print("[GokuCam] Window keys: SPACE new background, F fullscreen, Q quit.")
+    if saved_background is None:
+        ask_to_leave_frame()
 
     try:
         while True:
@@ -412,7 +447,14 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                         background = (blur_background(saved_background) if args.blur_background
                                       else saved_background)
                         state.phase = "ready"
-                        print("[Webcam] Using the saved background. Press SPACE to capture a new one.")
+                        print("[GokuCam] Using the background saved last time, no need to leave "
+                              "the frame. Press SPACE to capture a new one.")
+                        announce_ready(come_back=False)
+                        ready_at = now
+                        came_back = False
+                    else:
+                        # Taken with another camera or resolution: capture a new one.
+                        ask_to_leave_frame()
                     saved_background = None
                 # Capture as soon as the frame has been empty for a moment, so
                 # the person does not have to time leaving with a countdown.
@@ -420,12 +462,13 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                     background_samples.clear()
                     empty_since = None
                     if now - person_notice_at >= PERSON_NOTICE_SECONDS:
-                        print(f"[Webcam] You are still in the frame ({fraction:.0%} "
+                        print(f"[GokuCam] You are still in the frame ({fraction:.0%} "
                               "of the image): step all the way out.")
                         person_notice_at = now
                 else:
                     if empty_since is None:
                         empty_since = now
+                        print("[GokuCam] The room looks empty: capturing the background, stay out...")
                     background_samples.append((now, camera_frame.copy()))
                     background_samples = [
                         sample for sample in background_samples
@@ -442,7 +485,10 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                         # once also blurs what is left behind after vanishing.
                         background = blur_background(candidate) if args.blur_background else candidate
                         state.phase = "ready"
-                        print("[Webcam] Background ready. You can step back in.")
+                        print("[GokuCam] Background ready.")
+                        announce_ready()
+                        ready_at = now
+                        came_back = True
                 display = camera_frame
 
             elif background is None:
@@ -524,11 +570,23 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                     display = render_saiyan(display, mask, hair_mask, level,
                                             saiyan.burst(now), now)
 
+            banner = None
+            if state.phase == "calibrating":
+                banner = (["Capturing the empty room...", "Stay out of the camera view"]
+                          if empty_since is not None else
+                          ["Leave the camera view for a few seconds",
+                           "GokuCam needs a picture of the empty room before the effects work"])
+            elif now - ready_at < READY_BANNER_SECONDS:
+                banner = ["Ready! Come back in" if came_back else "GokuCam ready",
+                          "Both fists up for 1 s: Super Saiyan",
+                          "Two fingers on your forehead for 1 s: Instant Transmission"]
             if virtual_camera is not None:
                 # Video apps mirror the self-view themselves and send the camera
                 # image as is, so undo our preview mirroring for the output.
-                send_virtual_frame(virtual_camera, display if args.no_mirror else cv2.flip(display, 1))
-            cv2.imshow(WINDOW_NAME, display)
+                # The banner is drawn after flipping so its text reads correctly.
+                output = display if args.no_mirror else cv2.flip(display, 1)
+                send_virtual_frame(virtual_camera, draw_banner(output, banner) if banner else output)
+            cv2.imshow(WINDOW_NAME, draw_banner(display, banner) if banner else display)
 
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
@@ -545,7 +603,7 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                 person_notice_at = float("-inf")
                 goku_trigger.reset()
                 saiyan_trigger.reset()
-                print("[Webcam] Step out of the frame: the new background is captured as soon as it is empty.")
+                ask_to_leave_frame()
             elif key == ord("f"):
                 state.fullscreen = not state.fullscreen
                 set_fullscreen(state.fullscreen)

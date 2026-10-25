@@ -72,8 +72,12 @@ class VideoLoopTests(unittest.TestCase):
         camera = Mock(width=40, height=24)
         camera.send.side_effect = send_error
         displayed = []
+        self.banners = []
         with ExitStack() as mocks:
             mocks.enter_context(patch.object(app, "parse_args", return_value=arguments(**overrides)))
+            # Record the setup banners but leave the frames untouched.
+            mocks.enter_context(patch.object(
+                app, "draw_banner", side_effect=lambda frame, lines: self.banners.append(lines) or frame))
             mocks.enter_context(patch.object(app, "download_models"))
             mocks.enter_context(patch.object(app, "open_camera", return_value=capture))
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(segmenter, recognizer)))
@@ -91,7 +95,7 @@ class VideoLoopTests(unittest.TestCase):
             mocks.enter_context(patch.object(app.cv2, "imshow", side_effect=lambda name, frame: displayed.append(frame.copy())))
             keys = (0, 0, 0, 0, ord("q"))
             mocks.enter_context(patch.object(app.cv2, "waitKey", side_effect=keys))
-            mocks.enter_context(patch.object(app.cv2, "putText", side_effect=AssertionError("No text on the video")))
+            mocks.enter_context(patch.object(app.cv2, "putText", side_effect=AssertionError("Only the setup banner draws text")))
             mocks.enter_context(patch("builtins.print"))
             if send_error is None:
                 self.assertEqual(app.run(), 0)
@@ -115,6 +119,10 @@ class VideoLoopTests(unittest.TestCase):
         np.testing.assert_array_equal(displayed[0], frames[0])  # Calibrating.
         np.testing.assert_array_equal(displayed[2], frames[2])  # Ready: the gesture fires.
         np.testing.assert_array_equal(displayed[4], frames[1])  # Vanished: only the background.
+        # The room is empty from the first frame, so it is captured straight
+        # away; then the banner explains the gestures.
+        self.assertTrue(self.banners[0][0].startswith("Capturing the empty room"))
+        self.assertTrue(self.banners[-1][0].startswith("Ready!"))
 
     def test_virtual_output_is_not_mirrored(self):
         _, camera, displayed = self.run_mock_video(no_mirror=False)
@@ -192,6 +200,16 @@ class CalibrationTests(unittest.TestCase):
             # Next start: the saved plate is used straight away, no person checks.
             _, checks = self.run_with_background_file(path, [])
             self.assertEqual(checks.call_count, 0)
+
+
+class BannerTests(unittest.TestCase):
+    def test_banner_darkens_only_the_bottom_and_keeps_size(self):
+        frame = np.full((720, 1280, 3), 200, np.uint8)
+        output = app.draw_banner(frame, ["Leave the camera view", "for a few seconds"])
+        self.assertEqual(output.shape, frame.shape)
+        np.testing.assert_array_equal(output[:500], frame[:500])
+        self.assertLess(output[-5:].mean(), frame[-5:].mean())
+        np.testing.assert_array_equal(frame, 200)  # The input frame is not modified.
 
 
 class BlurBackgroundTests(unittest.TestCase):
