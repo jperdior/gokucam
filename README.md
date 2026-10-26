@@ -1,6 +1,6 @@
 # GokuCam
 
-Turn Super Saiyan and use Instant Transmission on your webcam. It runs on macOS, Windows, and Linux, and works in Google Meet, Microsoft Teams, Zoom, or any app that can use a camera, through the OBS Virtual Camera.
+Turn Super Saiyan, use Instant Transmission, and throw a Spirit Bomb on your webcam. It runs on macOS, Windows, and Linux, and works in Google Meet, Microsoft Teams, Zoom, or any app that can use a camera, through the OBS Virtual Camera.
 
 Video is processed locally on your computer. Nothing is recorded or sent anywhere.
 
@@ -14,6 +14,11 @@ Video is processed locally on your computer. Nothing is recorded or sent anywher
 - Speed lines and a flash appear, you collapse into a beam of light, and you're gone.
 - To come back, lower your hand, then do the gesture again.
 - If you're Super Saiyan, the golden hair teleports with you.
+
+**Spirit Bomb:** step back from the camera and hold both hands high above your head for 1 second.
+- A glowing ball gathers energy above you and grows while your hands stay up.
+- Lower your hands to throw it at the camera.
+- From close up it won't start, so the terminal will tell you to step back.
 
 If you break a pose before the second is up, the countdown restarts. The terminal shows when a gesture is recognized.
 

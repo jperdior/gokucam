@@ -1,4 +1,4 @@
-"""GokuCam: turn Super Saiyan and use Instant Transmission on your webcam."""
+"""GokuCam: turn Super Saiyan, use Instant Transmission and throw a Spirit Bomb on your webcam."""
 
 from __future__ import annotations
 
@@ -20,9 +20,11 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 try:
+    from .genki_effect import GenkiDama, far_enough, render_genki
     from .goku_effect import GokuPoseDetector, GokuTrigger, TELEPORT_SECONDS, render_teleport
     from .saiyan_effect import SaiyanState, golden_hair, render_saiyan
 except ImportError:
+    from genki_effect import GenkiDama, far_enough, render_genki
     from goku_effect import GokuPoseDetector, GokuTrigger, TELEPORT_SECONDS, render_teleport
     from saiyan_effect import SaiyanState, golden_hair, render_saiyan
 
@@ -315,6 +317,30 @@ def update_saiyan(detector: GokuPoseDetector, trigger: GokuTrigger, saiyan: Saiy
         print("[Saiyan] Super Saiyan!" if saiyan.active else "[Saiyan] Back to normal.")
 
 
+def update_genki(detector: GokuPoseDetector, trigger: GokuTrigger, genki: GenkiDama,
+                 now: float, width: int) -> None:
+    """Hands held high from far back gather a Spirit Bomb; lowering them throws it."""
+    if genki.active:
+        if genki.follow(detector.raised_one, detector.head, now) == "throw":
+            print("[Genki] Spirit Bomb thrown!")
+        return
+    far = far_enough(detector.head, width)
+    # Both hands start the countdown; one is enough to keep holding.
+    holding = trigger.hold_started is not None and detector.raised_one is not None
+    event = trigger.update((detector.raised is not None or holding) and far, now)
+    if event == "start":
+        print("[Genki] Hands up: hold them for 1 second...")
+    elif event == "broken":
+        print("[Genki] Hands lowered: the countdown restarts.")
+    elif event == "trigger":
+        genki.start(now)
+        genki.follow(detector.raised, detector.head, now)
+        print("[Genki] Gathering energy... lower your hands to throw the Spirit Bomb.")
+    elif detector.raised is not None and not far and now - genki.hint_at >= 3.0:
+        genki.hint_at = now
+        print("[Genki] Hands up, but you are too close: step back from the camera.")
+
+
 def ask_to_leave_frame() -> None:
     print("[GokuCam] STEP 1: leave the camera view completely for a few seconds.")
     print("[GokuCam]         GokuCam needs a picture of the empty room first: the blur and")
@@ -327,6 +353,8 @@ def announce_ready(come_back: bool = True) -> None:
     print("[GokuCam]   - Both fists up for 1 second: Super Saiyan (again to power down).")
     print("[GokuCam]   - Two fingers on your forehead for 1 second: Instant Transmission"
           " (again to come back).")
+    print("[GokuCam]   - Step back and hold both hands above your head for 1 second: Spirit Bomb"
+          " (lower them to throw it).")
 
 
 def draw_banner(frame: np.ndarray, lines: list[str]) -> np.ndarray:
@@ -388,6 +416,8 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
     # Two hands track less steadily than one, so forgive longer dropouts.
     saiyan_trigger = GokuTrigger(grace_seconds=0.6)
     saiyan = SaiyanState()
+    genki_trigger = GokuTrigger(grace_seconds=1.0)
+    genki = GenkiDama()
     hair_mask: np.ndarray | None = None
     hair_mask_at = float("-inf")
     resources.callback(cv2.destroyAllWindows)
@@ -551,6 +581,7 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                         last_mask = None
                     else:
                         update_saiyan(detector, saiyan_trigger, saiyan, now)
+                        update_genki(detector, genki_trigger, genki, now, width)
 
                 display = camera_frame
                 level = saiyan.level(now)
@@ -569,6 +600,10 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                         hair_mask_at = now
                     display = render_saiyan(display, mask, hair_mask, level,
                                             saiyan.burst(now), now)
+                if genki.active:
+                    display = render_genki(display, genki, now)
+                    if genki.done(now):
+                        genki.reset()
 
             banner = None
             if state.phase == "calibrating":
@@ -579,7 +614,8 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
             elif now - ready_at < READY_BANNER_SECONDS:
                 banner = ["Ready! Come back in" if came_back else "GokuCam ready",
                           "Both fists up for 1 s: Super Saiyan",
-                          "Two fingers on your forehead for 1 s: Instant Transmission"]
+                          "Two fingers on your forehead for 1 s: Instant Transmission",
+                          "Step back, both hands high for 1 s: Spirit Bomb"]
             if virtual_camera is not None:
                 # Video apps mirror the self-view themselves and send the camera
                 # image as is, so undo our preview mirroring for the output.
@@ -603,6 +639,8 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                 person_notice_at = float("-inf")
                 goku_trigger.reset()
                 saiyan_trigger.reset()
+                genki_trigger.reset()
+                genki.reset()
                 ask_to_leave_frame()
             elif key == ord("f"):
                 state.fullscreen = not state.fullscreen

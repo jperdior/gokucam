@@ -8,8 +8,10 @@ import cv2
 import numpy as np
 
 try:
+    from .genki_effect import hands_raised
     from .saiyan_effect import Head, both_fists, head_from_face
 except ImportError:
+    from genki_effect import hands_raised
     from saiyan_effect import Head, both_fists, head_from_face
 
 
@@ -87,6 +89,9 @@ class GokuPoseDetector:
         self.forehead_ms = -FACE_MEMORY_MS
         self.head: Head | None = None
         self.fists = False
+        self.raised: np.ndarray | None = None
+        # Far from the camera one hand often drops out, so one is enough to keep going.
+        self.raised_one: np.ndarray | None = None
         self.last_hand_count = 0
 
     def track_face(self, image, timestamp_ms: int) -> None:
@@ -107,6 +112,8 @@ class GokuPoseDetector:
         hands = self.hands.detect_for_video(image, timestamp_ms).hand_landmarks
         self.last_hand_count = len(hands)
         self.fists = both_fists(hands, self.head, image.width, image.height)
+        self.raised = hands_raised(hands, self.head, image.width, image.height)
+        self.raised_one = hands_raised(hands, self.head, image.width, image.height, minimum=1)
         return goku_pose_from_landmarks(hands, self.forehead, image.width, image.height)
 
     def hair_mask(self, image, timestamp_ms: int) -> np.ndarray | None:

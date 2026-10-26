@@ -87,6 +87,7 @@ class VideoLoopTests(unittest.TestCase):
             # The teleport fires on the first check once the background is ready.
             mocks.enter_context(patch.object(app, "update_goku", side_effect=[True, False, False]))
             mocks.enter_context(patch.object(app, "update_saiyan"))
+            mocks.enter_context(patch.object(app, "update_genki"))
             times = (0, 0, 0.1, 4.1, 4.3, 4.35, 5.2, 5.22, 8.2, 8.23)
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=times))
             mocks.enter_context(patch.object(app.cv2, "namedWindow"))
@@ -156,6 +157,7 @@ class CalibrationTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
             mocks.enter_context(patch.object(app, "update_goku", return_value=False))
             mocks.enter_context(patch.object(app, "update_saiyan"))
+            mocks.enter_context(patch.object(app, "update_genki"))
             # A person in the first frame, then the room stays empty.
             checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=[0.3, 0.0, 0.0]))
             times = (0, 0, 0.1, 0.2, 0.9, 1.0)
@@ -182,6 +184,7 @@ class CalibrationTests(unittest.TestCase):
             mocks.enter_context(patch.object(app, "create_tasks", return_value=(Mock(), Mock())))
             mocks.enter_context(patch.object(app, "update_goku", return_value=False))
             mocks.enter_context(patch.object(app, "update_saiyan"))
+            mocks.enter_context(patch.object(app, "update_genki"))
             checks = mocks.enter_context(patch.object(app, "person_fraction", side_effect=person_checks))
             mocks.enter_context(patch.object(app.time, "perf_counter", side_effect=(0, 0, 0.1, 0.2, 0.9, 1.0)))
             for name in ("namedWindow", "resizeWindow", "destroyAllWindows", "imshow"):
