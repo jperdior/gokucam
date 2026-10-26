@@ -55,6 +55,9 @@ PERSON_NOTICE_SECONDS = 4.0
 READY_BANNER_SECONDS = 5.0
 BACKGROUND_SAMPLE_SECONDS = 0.55
 GESTURE_INTERVAL_SECONDS = 0.08
+MASK_EDGE_RADIUS = 6
+MASK_EDGE_EPS = 1e-3 * 255 ** 2
+MASK_SMOOTHING = 0.35  # Share of the previous mask kept each frame.
 
 
 @dataclass
@@ -252,14 +255,30 @@ def person_mask(
     timestamp_ms: int,
     width: int,
     height: int,
+    guide: np.ndarray | None = None,
+    previous: np.ndarray | None = None,
 ) -> np.ndarray:
+    """Person confidence per pixel. With the camera frame as `guide` the edges
+    are snapped to the real image, and `previous` smooths flicker over time."""
     result = segmenter.segment_for_video(image, timestamp_ms)
     if not result.confidence_masks:
         return np.zeros((height, width), dtype=np.float32)
     raw = np.squeeze(result.confidence_masks[0].numpy_view()).astype(np.float32)
-    resized = cv2.resize(raw, (width, height), interpolation=cv2.INTER_LINEAR)
-    resized = cv2.GaussianBlur(resized, (0, 0), sigmaX=2.2, sigmaY=2.2)
-    return np.clip((resized - 0.12) / 0.68, 0.0, 1.0)
+    if guide is None:
+        resized = cv2.resize(raw, (width, height), interpolation=cv2.INTER_LINEAR)
+        resized = cv2.GaussianBlur(resized, (0, 0), sigmaX=2.2, sigmaY=2.2)
+        return np.clip((resized - 0.12) / 0.68, 0.0, 1.0)
+    # The model sees a tiny image; a guided filter at half size makes the
+    # edge follow hair and shoulders in the real frame instead of blocks.
+    half = (width // 2, height // 2)
+    small_guide = cv2.resize(guide, half, interpolation=cv2.INTER_AREA)
+    small = cv2.resize(raw, half, interpolation=cv2.INTER_LINEAR)
+    small = cv2.ximgproc.guidedFilter(small_guide, small, MASK_EDGE_RADIUS, MASK_EDGE_EPS)
+    mask = cv2.resize(small, (width, height), interpolation=cv2.INTER_LINEAR)
+    mask = np.clip((mask - 0.2) / 0.6, 0.0, 1.0)
+    if previous is not None and previous.shape == mask.shape:
+        mask = cv2.addWeighted(mask, 1.0 - MASK_SMOOTHING, previous, MASK_SMOOTHING, 0.0)
+    return mask
 
 
 def person_fraction(
@@ -277,6 +296,27 @@ def person_fraction(
 def blur_background(background: np.ndarray) -> np.ndarray:
     sigma = max(4.0, background.shape[1] / 70.0)
     return cv2.GaussianBlur(background, (0, 0), sigmaX=sigma, sigmaY=sigma)
+
+
+def refresh_background(background: np.ndarray, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Keep the blurred background live: blur what the camera sees around the
+    person, and keep the remembered room only where the person hides it."""
+    height, width = frame.shape[:2]
+    size = (max(8, width // 4), max(8, height // 4))
+    small = cv2.resize(frame, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+    person = cv2.resize(mask, size, interpolation=cv2.INTER_AREA)
+    # Stay clear of the person's edge so they do not smear into the blur.
+    keep = cv2.erode(np.clip(1.0 - person * 2.0, 0.0, 1.0), np.ones((5, 5), np.uint8))
+    sigma = max(1.0, width / 70.0 / 4.0)
+    covered = cv2.GaussianBlur(keep, (0, 0), sigmaX=sigma)
+    live = cv2.GaussianBlur(small * keep[:, :, None], (0, 0), sigmaX=sigma)
+    live /= np.maximum(covered, 1e-3)[:, :, None]
+    rate = np.clip((covered - 0.4) / 0.4, 0.0, 1.0) * 0.6
+    old = cv2.resize(background, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+    blended = old * (1.0 - rate[:, :, None]) + live * rate[:, :, None]
+    # Everything here is blurred, so a quarter-size image scaled up loses nothing.
+    return cv2.resize(np.clip(blended, 0, 255).astype(np.uint8), (width, height),
+                      interpolation=cv2.INTER_LINEAR)
 
 
 def alpha_composite(person: np.ndarray, background: np.ndarray, alpha: np.ndarray) -> np.ndarray:
@@ -441,6 +481,7 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
     last_mask: np.ndarray | None = None
     last_mask_at = float("-inf")
     vanished_frame: np.ndarray | None = None
+    smooth_mask: np.ndarray | None = None
     virtual_camera = None
     virtual_camera_initialized = False
     person_notice_at = float("-inf")
@@ -589,8 +630,11 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                     if mp_image is None:
                         rgb = cv2.cvtColor(camera_frame, cv2.COLOR_BGR2RGB)
                         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                    mask = person_mask(segmenter, mp_image, elapsed_ms, width, height)
+                    mask = person_mask(segmenter, mp_image, elapsed_ms, width, height,
+                                       guide=camera_frame, previous=smooth_mask)
+                    smooth_mask = mask
                 if args.blur_background:
+                    background = refresh_background(background, camera_frame, mask)
                     display = alpha_composite(camera_frame, background, mask)
                 if level > 0.0:
                     # Hair segmentation is the slowest model; refresh it
