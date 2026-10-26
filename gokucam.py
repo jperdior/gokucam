@@ -598,7 +598,7 @@ def run_camera(args: argparse.Namespace, resources: ExitStack) -> int:
                 level = saiyan.level(now)
                 if level > 0.0 and hair_mask is not None:
                     # The golden hair teleports with the person.
-                    teleport_frame = golden_hair(camera_frame, hair_mask, last_mask, level)
+                    teleport_frame = golden_hair(camera_frame, hair_mask, last_mask, level, now)
                 display = render_teleport(
                     teleport_frame, background, last_mask,
                     1.0 - progress if appearing else progress, now,

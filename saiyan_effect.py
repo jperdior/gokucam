@@ -123,7 +123,7 @@ class SaiyanState:
 _flames: dict[tuple[int, int], np.ndarray] = {}
 
 
-AURA_WIDTH = 2.5  # How far the aura reaches out from the body.
+AURA_WIDTH = 4.0  # How far the aura reaches out from the body.
 
 
 def _flame_texture(height: int, width: int) -> np.ndarray:
@@ -196,8 +196,50 @@ DARK_GOLD = np.array((20, 135, 210), np.float32)   # BGR
 LIGHT_GOLD = np.array((165, 245, 255), np.float32)
 
 
-def golden_hair(frame: np.ndarray, hair: np.ndarray, person: np.ndarray, level: float) -> np.ndarray:
-    """Recolour the real hair gold, keeping its strands and shading."""
+HAIR_LIFT = 1.4      # How many times its own thickness the hair rises.
+HAIR_WAVES = 3       # Gentle rises and dips across the head.
+HAIR_SWAY = 0.025    # Side-to-side wave at the tips, as a share of the hair width.
+HAIR_GLOW = np.array((120, 235, 255), np.float32)
+
+
+def _hair_roots(weight: np.ndarray) -> tuple[np.ndarray, float] | None:
+    """Per column, the row the hair rises from (just below its top edge),
+    and the hair's typical thickness."""
+    inside = weight > 0.3
+    has = inside.any(axis=0)
+    if has.sum() < 3:
+        return None
+    top = np.argmax(inside, axis=0).astype(np.float32)
+    thickness = float(np.median(inside.sum(axis=0)[has]))
+    columns = np.arange(weight.shape[1], dtype=np.float32)
+    top = np.interp(columns, columns[has], top[has]).astype(np.float32)
+    top = cv2.GaussianBlur(top[None, :], (0, 0), sigmaX=max(1.0, weight.shape[1] * 0.03)).ravel()
+    return top + thickness * 0.7, thickness
+
+
+def _flow(layer: np.ndarray, roots: np.ndarray, lift: np.ndarray, level: float,
+          t: float) -> np.ndarray:
+    """Stretch a layer upwards from each column's roots into waving spikes."""
+    height, width = layer.shape[:2]
+    columns = np.arange(width, dtype=np.float32)[None, :]
+    rows = np.arange(height, dtype=np.float32)[:, None]
+    stretch = 1.0 + lift[None, :]
+    rise = np.maximum(roots[None, :] - rows, 0.0)  # Distance above the roots.
+    tip = np.clip(rise / np.maximum(lift[None, :] * 20.0, 1.0), 0.0, 1.0)
+    sway = HAIR_SWAY * width * level * tip * (
+        np.sin(rows * 0.08 - t * 6.0 + columns * 0.03) * 0.7
+        + np.sin(rows * 0.19 + t * 9.0) * 0.3)
+    map_x = np.broadcast_to(columns + sway, (height, width)).astype(np.float32)
+    # Below the roots nothing moves; above them the hair is stretched upwards.
+    map_y = np.broadcast_to(rows + rise * (1.0 - 1.0 / stretch), (height, width)).astype(np.float32)
+    return cv2.remap(layer, np.ascontiguousarray(map_x), np.ascontiguousarray(map_y),
+                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+
+def golden_hair(frame: np.ndarray, hair: np.ndarray, person: np.ndarray, level: float,
+                t: float | None = None) -> np.ndarray:
+    """Recolour the real hair gold, keeping its strands and shading. With a time
+    `t` the hair also rises into flowing, glowing Super Saiyan spikes."""
     # Only confident hair on the body: a dark chair behind the head is not hair.
     confident = np.clip((hair - 0.45) / 0.35, 0.0, 1.0)
     body = np.clip((person - 0.4) / 0.4, 0.0, 1.0)
@@ -206,6 +248,19 @@ def golden_hair(frame: np.ndarray, hair: np.ndarray, person: np.ndarray, level: 
     if points is None:
         return frame
     x, y, w, h = cv2.boundingRect(points)
+    roots = None
+    if t is not None:
+        found = _hair_roots(weight[y:y + h, x:x + w])
+        if found is not None:
+            roots, thickness = found
+            # Room above and beside the hair for it to rise and sway into.
+            frame_height, frame_width = frame.shape[:2]
+            rise = int(thickness * HAIR_LIFT * 1.6 * min(1.0, level)) + 4
+            side = int(w * HAIR_SWAY * 1.5) + 4
+            left, top = max(0, x - side), max(0, y - rise)
+            right = min(frame_width, x + w + side)
+            roots = np.pad(roots, (x - left, right - x - w), mode="edge") + (y - top)
+            x, y, w, h = left, top, right - left, y + h - top
     area = np.s_[y:y + h, x:x + w]
     region = frame[area].astype(np.float32)
     # Stretch the hair's own brightness range over the gold ramp so light and
@@ -216,9 +271,31 @@ def golden_hair(frame: np.ndarray, hair: np.ndarray, person: np.ndarray, level: 
         return frame
     low, high = np.percentile(inside, (5, 95))
     shade = np.clip((luminance - low) / max(float(high - low), 1.0), 0.0, 1.0)
-    shade = (0.15 + 0.85 * shade ** 0.8)[:, :, None]
-    gold = DARK_GOLD * (1.0 - shade) + LIGHT_GOLD * shade
-    blend = cv2.GaussianBlur(weight[area], (0, 0), sigmaX=1.5)[:, :, None] * 0.9
+    shade = 0.15 + 0.85 * shade ** 0.8
+    blend = cv2.GaussianBlur(weight[area], (0, 0), sigmaX=1.5) * 0.9
+    if roots is None:
+        gold = DARK_GOLD * (1.0 - shade[:, :, None]) + LIGHT_GOLD * shade[:, :, None]
+        blend = blend[:, :, None]
+        output = frame.copy()
+        output[area] = np.clip(region * (1.0 - blend) + gold * blend, 0, 255).astype(np.uint8)
+        return output
+
+    # The hair stands up with soft, slowly drifting waves, and breathes a little.
+    phase = np.arange(w, dtype=np.float32) / max(w, 1) * HAIR_WAVES * 2.0 * math.pi
+    waves = 0.5 + 0.5 * np.sin(phase + t * 1.5)
+    lift = HAIR_LIFT * min(1.0, level) * (0.7 + 0.3 * waves) * (
+        0.92 + 0.08 * math.sin(t * 7.0))
+    # Energy streaks running up through the hair.
+    streaks = np.roll(_flame_texture(h, w), -int(t * h * 1.4) % h, axis=0)
+    shade = np.clip(shade * (0.75 + 0.5 * streaks), 0.0, 1.0).astype(np.float32)
+    shade = _flow(shade, roots, lift, level, t)
+    risen = _flow(blend.astype(np.float32), roots, lift, level, t)
+    blend = np.maximum(risen, blend)
+    gold = DARK_GOLD * (1.0 - shade[:, :, None]) + LIGHT_GOLD * shade[:, :, None]
+    glow = np.clip(cv2.GaussianBlur(blend, (0, 0), sigmaX=6.0) * 1.2 - blend, 0.0, 1.0)
+    glow *= 0.6 * min(1.0, level) * (0.85 + 0.15 * math.sin(t * 10.0))
+    region = 255.0 - (255.0 - region) * (1.0 - glow[:, :, None] * HAIR_GLOW / 255.0)
+    blend = blend[:, :, None]
     output = frame.copy()
     output[area] = np.clip(region * (1.0 - blend) + gold * blend, 0, 255).astype(np.uint8)
     return output
@@ -226,6 +303,8 @@ def golden_hair(frame: np.ndarray, hair: np.ndarray, person: np.ndarray, level: 
 
 def render_saiyan(display: np.ndarray, mask: np.ndarray, hair: np.ndarray | None,
                   level: float, burst: float, t: float) -> np.ndarray:
+    # The aura goes behind everything, including hair that rises above the head.
+    display = render_aura(display, mask, level, burst, t)
     if hair is not None:
-        display = golden_hair(display, hair, mask, level)
-    return render_aura(display, mask, level, burst, t)
+        display = golden_hair(display, hair, mask, level, t)
+    return display

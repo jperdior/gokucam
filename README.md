@@ -7,7 +7,7 @@ Video is processed locally on your computer. Nothing is recorded or sent anywher
 ## Gestures
 
 **Super Saiyan:** raise both fists in front of you and hold them for 1 second.
-- Your real hair turns gold, and a golden aura flares up around you.
+- Your real hair turns gold and rises, flowing with energy, and a golden aura flares up around you.
 - Do it again to power down.
 
 **Instant Transmission:** hold your index and middle fingers straight and together on your forehead for 1 second.
